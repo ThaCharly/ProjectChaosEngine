@@ -52,57 +52,84 @@ int main()
 
 		sf::Event event;
 		while (window.pollEvent(event)) {
+            ImGui::SFML::ProcessEvent(window, event);
 			if (event.type == sf::Event::Closed)
 				window.close();
 			if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::Escape)
 				window.close();
 		}
 
-        ImGui::SFML::Update(window, deltaClock.restart());
+ImGui::SFML::Update(window, deltaClock.restart());
 
-        // --- CONSTRUIMOS LA VENTANA DE CONTROL ---
+        // --- ENGINEER CONSOLE ---
         ImGui::Begin("Engineer Console");
         
-        ImGui::Text("Global Settings");
-        ImGui::Checkbox("Enforce Constant Speed", &physics.enforceSpeed);
+        // PAUSA
+        if (physics.isPaused) {
+            if (ImGui::Button("PLAY", ImVec2(100, 50))) physics.isPaused = false;
+        } else {
+            if (ImGui::Button("PAUSE", ImVec2(100, 50))) physics.isPaused = true;
+        }
+
+        ImGui::Separator();
+        ImGui::Text("Physics Parameters");
+
+        // VELOCIDAD
+        ImGui::Checkbox("Enforce Speed", &physics.enforceSpeed);
         ImGui::SliderFloat("Target Speed", &physics.targetSpeed, 0.0f, 50.0f);
         
-        if (ImGui::Button("Reset All Positions")) {
+        // TAMAÑO (Requiere actualización)
+        float size = physics.currentRacerSize;
+        if (ImGui::SliderFloat("Racer Size (m)", &size, 0.1f, 5.0f)) {
+            physics.updateRacerSize(size);
+        }
+
+        // RESTITUCIÓN (Rebote)
+        float rest = physics.currentRestitution;
+        if (ImGui::SliderFloat("Bounciness", &rest, 0.0f, 2.0f)) {
+            physics.updateRestitution(rest);
+        }
+
+        // ROTACIÓN
+        bool fixedRot = physics.currentFixedRotation;
+        if (ImGui::Checkbox("Fixed Rotation", &fixedRot)) {
+            physics.updateFixedRotation(fixedRot);
+        }
+
+        // GRAVEDAD
+        ImGui::Checkbox("Enable Gravity", &physics.enableGravity);
+
+        ImGui::Separator();
+        if (ImGui::Button("RESET SIMULATION", ImVec2(-1, 30))) {
             physics.resetRacers();
         }
 
         ImGui::Separator();
-        ImGui::Text("Racer Telemetry");
+        ImGui::Text("Racers Data");
 
         const auto& bodies = physics.getDynamicBodies();
         for (size_t i = 0; i < bodies.size(); ++i) {
             b2Body* b = bodies[i];
             
-            std::string label = "Racer " + std::to_string(i);
-            if (ImGui::TreeNode(label.c_str())) {
+            ImGui::PushID(i); // Para que ImGui no se confunda con los nombres iguales
+            if (ImGui::TreeNode((std::string("Racer ") + std::to_string(i)).c_str())) {
                 
-                // LEER POSICION Y VELOCIDAD
                 b2Vec2 pos = b->GetPosition();
                 b2Vec2 vel = b->GetLinearVelocity();
-                
-                // Conversión visual (Metros -> float[2])
                 float p[2] = { pos.x, pos.y };
                 float v[2] = { vel.x, vel.y };
 
-                // EDITAR POSICION (Drag Float)
-                if (ImGui::DragFloat2("Position (m)", p, 0.1f)) {
+                if (ImGui::DragFloat2("Pos", p, 0.1f)) {
                     b->SetTransform(b2Vec2(p[0], p[1]), b->GetAngle());
-                    b->SetAwake(true); // Despertar si estaba dormido
+                    b->SetAwake(true);
                 }
-
-                // EDITAR VELOCIDAD
-                if (ImGui::DragFloat2("Velocity (m/s)", v, 0.1f)) {
+                if (ImGui::DragFloat2("Vel", v, 0.1f)) {
                     b->SetLinearVelocity(b2Vec2(v[0], v[1]));
                     b->SetAwake(true);
                 }
-
                 ImGui::TreePop();
             }
+            ImGui::PopID();
         }
 
         ImGui::End();

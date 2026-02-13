@@ -14,9 +14,20 @@ public:
 
     static constexpr float SCALE = 30.0f;
 
+    void updateRacerSize(float newSize);       // Recrea la forma física
+    void updateRestitution(float newRest);     // Cambia el rebote
+    void updateFixedRotation(bool fixed);      // Traba/Destraba rotación
+    void updateFriction(float newFriction);
+    float currentRacerSize = 1.0f;
+    float currentRestitution = 1.0f;
+    float currentFriction = 0.0f;
+    bool currentFixedRotation = true;
+
+
     float targetSpeed = 15.0f;     // Velocidad objetivo
     bool enforceSpeed = true;      // ¿Forzamos la velocidad constante?
     bool enableGravity = false;    // Por si querés probar gravedad
+    bool isPaused = false;
 
 private:
     void createWalls(float widthPixels, float heightPixels);
