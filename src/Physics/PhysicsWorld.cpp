@@ -96,7 +96,7 @@ void PhysicsWorld::createWinZone() {
     bodyDef.type = b2_staticBody;
     
     // Posición inicial default
-    winZonePos[0] = worldWidthMeters / 2.0f;
+    winZonePos[0] = worldWidthMeters / 1.0f;
     winZonePos[1] = worldHeightMeters * 0.8f;
     
     bodyDef.position.Set(winZonePos[0], winZonePos[1]);
