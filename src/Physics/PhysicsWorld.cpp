@@ -1,28 +1,82 @@
 #include "PhysicsWorld.hpp"
+#include <cmath>
+#include <iostream>
 
 PhysicsWorld::PhysicsWorld(float widthPixels, float heightPixels)
-    : world(b2Vec2(0.0f, 0.0f)) // gravedad cero
+    : world(b2Vec2(0.0f, 0.0f)) 
 {
+    rng.seed(42);
+
+    world.SetContactListener(&contactListener);
+
     worldWidthMeters = widthPixels / SCALE;
     worldHeightMeters = heightPixels / SCALE;
 
     createWalls(widthPixels, heightPixels);
+    createWinZone(); // Crea la meta al inicio
     createRacers();
 }
 
-// En PhysicsWorld::step
+float PhysicsWorld::randomFloat(float min, float max) {
+    std::uniform_real_distribution<float> dist(min, max);
+    return dist(rng);
+}
+
 void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
-    if (isPaused) return;
+    if (isPaused || gameOver) return;
+
+    // Configuración dinámica
     world.SetGravity(enableGravity ? b2Vec2(0.0f, 9.8f) : b2Vec2(0.0f, 0.0f));
+    
+    // Limpieza
+    contactListener.bodiesToCheck.clear();
+    contactListener.winnerBody = nullptr;
+
+    // Paso físico
     world.Step(timeStep, velIter, posIter);
 
-if (enforceSpeed) {
+    // 1. CHEQUEO DE VICTORIA
+    if (contactListener.winnerBody != nullptr) {
+        gameOver = true;
+        for (int i = 0; i < dynamicBodies.size(); ++i) {
+            if (dynamicBodies[i] == contactListener.winnerBody) {
+                winnerIndex = i;
+                break;
+            }
+        }
+        std::cout << ">>> VICTORY: RACER " << winnerIndex << " <<<" << std::endl;
+        return; 
+    }
+
+    // 2. SISTEMA DE CAOS (GLITCHES)
+    if (enableChaos) {
+        for (b2Body* body : contactListener.bodiesToCheck) {
+            if (randomFloat(0.0f, 1.0f) < chaosChance) {
+                b2Vec2 vel = body->GetLinearVelocity();
+                
+                // Desviación
+                float angleDev = randomFloat(-0.5f, 0.5f);
+                float cs = cos(angleDev); float sn = sin(angleDev);
+                float px = vel.x * cs - vel.y * sn;
+                float py = vel.x * sn + vel.y * cs;
+                
+                // Boost
+                body->SetLinearVelocity(b2Vec2(px * chaosBoost, py * chaosBoost));
+            }
+        }
+    }
+
+    // 3. CONTROL DE VELOCIDAD
+    if (enforceSpeed) {
         for (b2Body* b : dynamicBodies) {
             b2Vec2 vel = b->GetLinearVelocity();
             float speed = vel.Length();
             
-            // Usamos targetSpeed variable
-            if (speed < targetSpeed - 0.5f || speed > targetSpeed + 0.5f) { 
+            if (speed > targetSpeed + 2.0f) {
+                vel *= 0.98f; // Freno suave tras glitch
+                b->SetLinearVelocity(vel);
+            }
+            else if (speed < targetSpeed - 0.5f || speed > targetSpeed + 0.5f) { 
                 vel.Normalize();
                 vel *= targetSpeed; 
                 b->SetLinearVelocity(vel);
@@ -31,16 +85,57 @@ if (enforceSpeed) {
     }
 }
 
-// -- ACTUALIZADORES EN TIEMPO REAL --
+// --- EL MÉTODO QUE FALTABA (FIX DEL LINKER ERROR) ---
+b2Body* PhysicsWorld::getWinZoneBody() const {
+    return winZoneBody;
+}
+// ----------------------------------------------------
+
+void PhysicsWorld::createWinZone() {
+    b2BodyDef bodyDef;
+    bodyDef.type = b2_staticBody;
+    
+    // Posición inicial default
+    winZonePos[0] = worldWidthMeters / 2.0f;
+    winZonePos[1] = worldHeightMeters * 0.8f;
+    
+    bodyDef.position.Set(winZonePos[0], winZonePos[1]);
+    winZoneBody = world.CreateBody(&bodyDef);
+    
+    b2PolygonShape box;
+    box.SetAsBox(winZoneSize[0] / 2.0f, winZoneSize[1] / 2.0f);
+    
+    b2FixtureDef fixtureDef;
+    fixtureDef.shape = &box;
+    fixtureDef.isSensor = true; // Se atraviesa
+    
+    winZoneBody->CreateFixture(&fixtureDef);
+    contactListener.winZoneBody = winZoneBody;
+}
+
+void PhysicsWorld::updateWinZone(float x, float y, float w, float h) {
+    if (!winZoneBody) return;
+    
+    winZoneBody->SetTransform(b2Vec2(x, y), 0.0f);
+    winZoneBody->DestroyFixture(winZoneBody->GetFixtureList());
+    
+    b2PolygonShape box;
+    box.SetAsBox(w / 2.0f, h / 2.0f);
+    
+    b2FixtureDef fd;
+    fd.shape = &box;
+    fd.isSensor = true;
+    
+    winZoneBody->CreateFixture(&fd);
+    
+    winZonePos[0] = x; winZonePos[1] = y;
+    winZoneSize[0] = w; winZoneSize[1] = h;
+}
 
 void PhysicsWorld::updateRacerSize(float newSize) {
     currentRacerSize = newSize;
-    // Box2D no deja escalar una fixture. Hay que borrarla y crear una nueva.
     for (b2Body* b : dynamicBodies) {
-        // Borramos la fixture vieja (asumiendo que solo tienen 1, la caja)
         b->DestroyFixture(b->GetFixtureList());
-
-        // Creamos la nueva
         b2PolygonShape dynamicBox;
         dynamicBox.SetAsBox(newSize / 2.0f, newSize / 2.0f);
 
@@ -51,14 +146,13 @@ void PhysicsWorld::updateRacerSize(float newSize) {
         fixtureDef.restitution = currentRestitution;
 
         b->CreateFixture(&fixtureDef);
-        b->SetAwake(true); // Despertar al cuerpo
+        b->SetAwake(true);
     }
 }
 
 void PhysicsWorld::updateRestitution(float newRest) {
     currentRestitution = newRest;
     for (b2Body* b : dynamicBodies) {
-        // Iteramos las fixtures (aunque sea una)
         for (b2Fixture* f = b->GetFixtureList(); f; f = f->GetNext()) {
             f->SetRestitution(newRest);
         }
@@ -82,26 +176,25 @@ void PhysicsWorld::updateFixedRotation(bool fixed) {
     }
 }
 
-// -------------------
-
-
 const std::vector<b2Body*>& PhysicsWorld::getDynamicBodies() const {
     return dynamicBodies;
 }
 
 void PhysicsWorld::resetRacers() {
-    // Reinicia posiciones a una formación básica
     int i = 0;
     for (b2Body* b : dynamicBodies) {
         float x = (worldWidthMeters / 5.0f) * (i + 1);
         float y = worldHeightMeters / 2.0f;
         
         b->SetTransform(b2Vec2(x, y), 0.0f);
-        b->SetLinearVelocity(b2Vec2(targetSpeed, targetSpeed)); // Reinicia velocidad
+        b->SetLinearVelocity(b2Vec2(targetSpeed, targetSpeed));
         b->SetAngularVelocity(0.0f);
         b->SetAwake(true);
         i++;
     }
+    gameOver = false;
+    winnerIndex = -1;
+    isPaused = false;
 }
 
 void PhysicsWorld::createWalls(float widthPixels, float heightPixels) {
@@ -131,9 +224,7 @@ void PhysicsWorld::createWalls(float widthPixels, float heightPixels) {
 }
 
 void PhysicsWorld::createRacers() {
-
-    float size = currentRacerSize; // 1 metro
-
+    float size = currentRacerSize;
     b2PolygonShape dynamicBox;
     dynamicBox.SetAsBox(size / 2.0f, size / 2.0f);
 
@@ -141,24 +232,21 @@ void PhysicsWorld::createRacers() {
     fixtureDef.shape = &dynamicBox;
     fixtureDef.density = 1.0f;
     fixtureDef.friction = currentFriction;
-    fixtureDef.restitution = currentRestitution; // pequeño boost anti-pérdida, cambiar a 1.0f para física más realista
+    fixtureDef.restitution = currentRestitution;
 
     for (int i = 0; i < 4; ++i) {
-
         b2BodyDef bodyDef;
         bodyDef.type = b2_dynamicBody;
         bodyDef.bullet = true;
         bodyDef.fixedRotation = currentFixedRotation;
 
-        float x = 3.0f + i * 3.0f;
-        float y = 3.0f + i * 2.0f;
-
+        float x = (worldWidthMeters / 5.0f) * (i + 1);
+        float y = worldHeightMeters / 2.0f;
         bodyDef.position.Set(x, y);
 
         b2Body* body = world.CreateBody(&bodyDef);
         body->CreateFixture(&fixtureDef);
-
-        body->SetLinearVelocity(b2Vec2(targetSpeed, targetSpeed)); // Velocidad inicial positiva
+        body->SetLinearVelocity(b2Vec2(targetSpeed, targetSpeed));
 
         dynamicBodies.push_back(body);
     }
