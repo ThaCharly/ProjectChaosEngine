@@ -76,17 +76,17 @@ ImGui::SFML::Update(window, deltaClock.restart());
 
         // VELOCIDAD
         ImGui::Checkbox("Enforce Speed", &physics.enforceSpeed);
-        ImGui::SliderFloat("Target Speed", &physics.targetSpeed, 0.0f, 50.0f);
+        ImGui::DragFloat("Target Speed", &physics.targetSpeed, 0.0f, 50.0f);
         
         // TAMAÑO (Requiere actualización)
         float size = physics.currentRacerSize;
-        if (ImGui::SliderFloat("Racer Size (m)", &size, 0.1f, 5.0f)) {
+        if (ImGui::DragFloat("Racer Size (m)", &size, 0.1f, 5.0f)) {
             physics.updateRacerSize(size);
         }
 
         // RESTITUCIÓN (Rebote)
         float rest = physics.currentRestitution;
-        if (ImGui::SliderFloat("Bounciness", &rest, 0.0f, 2.0f)) {
+        if (ImGui::DragFloat("Bounciness", &rest, 0.0f, 2.0f)) {
             physics.updateRestitution(rest);
         }
 
