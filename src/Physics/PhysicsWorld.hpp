@@ -10,8 +10,13 @@ public:
     void step(float timeStep, int velocityIterations, int positionIterations);
 
     const std::vector<b2Body*>& getDynamicBodies() const;
+    void resetRacers();
 
     static constexpr float SCALE = 30.0f;
+
+    float targetSpeed = 15.0f;     // Velocidad objetivo
+    bool enforceSpeed = true;      // ¿Forzamos la velocidad constante?
+    bool enableGravity = false;    // Por si querés probar gravedad
 
 private:
     void createWalls(float widthPixels, float heightPixels);

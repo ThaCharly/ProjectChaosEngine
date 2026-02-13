@@ -12,24 +12,41 @@ PhysicsWorld::PhysicsWorld(float widthPixels, float heightPixels)
 
 // En PhysicsWorld::step
 void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
+    world.SetGravity(enableGravity ? b2Vec2(0.0f, 9.8f) : b2Vec2(0.0f, 0.0f));
     world.Step(timeStep, velIter, posIter);
 
-    // Mantenimiento de velocidad constante
-    for (b2Body* b : dynamicBodies) {
-        b2Vec2 vel = b->GetLinearVelocity();
-        float speed = vel.Length();
-        
-        // Si se frena o se acelera demasiado, normalizamos
-        if (speed < 15.0f || speed > 15.5f) { 
-            vel.Normalize();
-            vel *= 15.0f; // Velocidad crucero fija
-            b->SetLinearVelocity(vel);
+if (enforceSpeed) {
+        for (b2Body* b : dynamicBodies) {
+            b2Vec2 vel = b->GetLinearVelocity();
+            float speed = vel.Length();
+            
+            // Usamos targetSpeed variable
+            if (speed < targetSpeed - 0.5f || speed > targetSpeed + 0.5f) { 
+                vel.Normalize();
+                vel *= targetSpeed; 
+                b->SetLinearVelocity(vel);
+            }
         }
-    } 
+    }
 }
 
 const std::vector<b2Body*>& PhysicsWorld::getDynamicBodies() const {
     return dynamicBodies;
+}
+
+void PhysicsWorld::resetRacers() {
+    // Reinicia posiciones a una formación básica
+    int i = 0;
+    for (b2Body* b : dynamicBodies) {
+        float x = (worldWidthMeters / 5.0f) * (i + 1);
+        float y = worldHeightMeters / 2.0f;
+        
+        b->SetTransform(b2Vec2(x, y), 0.0f);
+        b->SetLinearVelocity(b2Vec2(targetSpeed, targetSpeed)); // Reinicia velocidad
+        b->SetAngularVelocity(0.0f);
+        b->SetAwake(true);
+        i++;
+    }
 }
 
 void PhysicsWorld::createWalls(float widthPixels, float heightPixels) {
@@ -101,7 +118,7 @@ void PhysicsWorld::createRacers() {
         b2Body* body = world.CreateBody(&bodyDef);
         body->CreateFixture(&fixtureDef);
 
-        body->SetLinearVelocity(b2Vec2(15.0f, 15.0f));
+        body->SetLinearVelocity(b2Vec2(targetSpeed, targetSpeed)); // Velocidad inicial positiva
 
         dynamicBodies.push_back(body);
     }

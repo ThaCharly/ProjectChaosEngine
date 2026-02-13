@@ -8,7 +8,6 @@ bin/
 .vscode/
 .idea/
 output/
-.gitignore
 
 CMakeFiles/
 CMakeCache.txt
