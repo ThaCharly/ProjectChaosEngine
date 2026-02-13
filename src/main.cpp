@@ -76,7 +76,7 @@ int main()
             rect.setPosition(pos.x * PhysicsWorld::SCALE,
                              pos.y * PhysicsWorld::SCALE);
 
-            //rect.setRotation(angle * 180.0f / b2_pi);
+           // rect.setRotation(angle * 180.0f / b2_pi);
 
             switch (i) {
                 case 0: rect.setFillColor(sf::Color::Cyan); break;
