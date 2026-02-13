@@ -14,7 +14,7 @@ PhysicsWorld::PhysicsWorld(float widthPixels, float heightPixels)
 void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
     world.Step(timeStep, velIter, posIter);
 
-    // Mantenimiento de velocidad constante (The "Eternal Motion" Hack)
+    // Mantenimiento de velocidad constante
     for (b2Body* b : dynamicBodies) {
         b2Vec2 vel = b->GetLinearVelocity();
         float speed = vel.Length();
