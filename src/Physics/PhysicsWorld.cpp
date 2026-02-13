@@ -19,6 +19,8 @@ float PhysicsWorld::randomFloat(float min, float max) {
     return dist(rng);
 }
 
+const float TARGET_SPEED = 20.0f;
+
 void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
     world.Step(timeStep, velIter, posIter);
 
@@ -27,16 +29,16 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
         b2Vec2 vel = b->GetLinearVelocity();
         float speed = vel.Length();
         
-        if (speed < 15.0f || speed > 15.5f) { 
+if (speed < TARGET_SPEED - 0.5f || speed > TARGET_SPEED + 0.5f) { 
             vel.Normalize();
-            vel *= 15.0f; 
+            vel *= TARGET_SPEED; 
             b->SetLinearVelocity(vel);
         }
 
         // 2. Mantenimiento de ROTACIÓN (El Sabor) [NUEVO]
         // Si giran muy lento, les damos un empujoncito en la dirección que ya tenían.
         float angularVel = b->GetAngularVelocity();
-        if (std::abs(angularVel) < 2.0f) { // Si giran a menos de 2 rad/s
+        if (std::abs(angularVel) < 0.3f) { // Si giran a menos de .3 rad/s
             // Mantenemos el signo del giro
             float boost = (angularVel > 0) ? 0.1f : -0.1f; 
             b->ApplyTorque(boost, true);
