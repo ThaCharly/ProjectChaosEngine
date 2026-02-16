@@ -1,6 +1,4 @@
 #include "PhysicsWorld.hpp"
-#include <SFML/Graphics.hpp>
-#include <SFML/Window.hpp>
 #include <cmath>
 #include <iostream>
 
@@ -15,7 +13,7 @@ PhysicsWorld::PhysicsWorld(float widthPixels, float heightPixels)
     worldHeightMeters = heightPixels / SCALE;
 
     createWalls(widthPixels, heightPixels);
-    createWinZone(); // Crea la meta al inicio
+    createWinZone();
     createRacers();
 }
 
@@ -27,17 +25,13 @@ float PhysicsWorld::randomFloat(float min, float max) {
 void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
     if (isPaused || gameOver) return;
 
-    // Configuración dinámica
     world.SetGravity(enableGravity ? b2Vec2(0.0f, 9.8f) : b2Vec2(0.0f, 0.0f));
     
-    // Limpieza
     contactListener.bodiesToCheck.clear();
     contactListener.winnerBody = nullptr;
 
-    // Paso físico
     world.Step(timeStep, velIter, posIter);
 
-    // 1. CHEQUEO DE VICTORIA
     if (contactListener.winnerBody != nullptr) {
         gameOver = true;
         for (int i = 0; i < dynamicBodies.size(); ++i) {
@@ -50,32 +44,26 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
         return; 
     }
 
-    // 2. SISTEMA DE CAOS (GLITCHES)
     if (enableChaos) {
         for (b2Body* body : contactListener.bodiesToCheck) {
             if (randomFloat(0.0f, 1.0f) < chaosChance) {
                 b2Vec2 vel = body->GetLinearVelocity();
-                
-                // Desviación
                 float angleDev = randomFloat(-0.5f, 0.5f);
                 float cs = cos(angleDev); float sn = sin(angleDev);
                 float px = vel.x * cs - vel.y * sn;
                 float py = vel.x * sn + vel.y * cs;
-                
-                // Boost
                 body->SetLinearVelocity(b2Vec2(px * chaosBoost, py * chaosBoost));
             }
         }
     }
 
-    // 3. CONTROL DE VELOCIDAD
     if (enforceSpeed) {
         for (b2Body* b : dynamicBodies) {
             b2Vec2 vel = b->GetLinearVelocity();
             float speed = vel.Length();
             
             if (speed > targetSpeed + 2.0f) {
-                vel *= 0.98f; // Freno suave tras glitch
+                vel *= 0.98f;
                 b->SetLinearVelocity(vel);
             }
             else if (speed < targetSpeed - 0.5f || speed > targetSpeed + 0.5f) { 
@@ -87,17 +75,81 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
     }
 }
 
-// --- EL MÉTODO QUE FALTABA (FIX DEL LINKER ERROR) ---
+// --- IMPLEMENTACIÓN DE CUSTOM WALLS ---
+
+void PhysicsWorld::addCustomWall(float x, float y, float w, float h) {
+    b2BodyDef bd;
+    bd.type = b2_staticBody; // Estático para que reboten contra ella
+    bd.position.Set(x, y);
+    
+    b2Body* body = world.CreateBody(&bd);
+    
+    b2PolygonShape box;
+    box.SetAsBox(w / 2.0f, h / 2.0f);
+    
+    b2FixtureDef fd;
+    fd.shape = &box;
+    fd.friction = 0.0f;    // Sin fricción (Hielo)
+    fd.restitution = 1.0f; // Rebote perfecto
+    
+    body->CreateFixture(&fd);
+    
+    // Guardamos en el vector para administrarla después
+    customWalls.push_back({body, w, h});
+}
+
+void PhysicsWorld::updateCustomWall(int index, float x, float y, float w, float h) {
+    if (index < 0 || index >= customWalls.size()) return;
+    
+    CustomWall& wall = customWalls[index];
+    
+    // 1. Mover el cuerpo
+    wall.body->SetTransform(b2Vec2(x, y), 0.0f);
+    
+    // 2. Si cambió el tamaño, hay que recrear la fixture
+    if (wall.width != w || wall.height != h) {
+        wall.body->DestroyFixture(wall.body->GetFixtureList());
+        
+        b2PolygonShape box;
+        box.SetAsBox(w / 2.0f, h / 2.0f);
+        
+        b2FixtureDef fd;
+        fd.shape = &box;
+        fd.friction = 0.0f;
+        fd.restitution = 1.0f;
+        
+        wall.body->CreateFixture(&fd);
+        
+        // Actualizamos los datos guardados
+        wall.width = w;
+        wall.height = h;
+    }
+}
+
+void PhysicsWorld::removeCustomWall(int index) {
+    if (index < 0 || index >= customWalls.size()) return;
+    
+    // Borramos el cuerpo físico de Box2D
+    world.DestroyBody(customWalls[index].body);
+    
+    // Borramos de nuestro vector
+    customWalls.erase(customWalls.begin() + index);
+}
+
+const std::vector<CustomWall>& PhysicsWorld::getCustomWalls() const {
+    return customWalls;
+}
+
+// --------------------------------------
+
 b2Body* PhysicsWorld::getWinZoneBody() const {
     return winZoneBody;
 }
-// ----------------------------------------------------
 
 void PhysicsWorld::createWinZone() {
     b2BodyDef bodyDef;
     bodyDef.type = b2_staticBody;
     
-    // Posición inicial default
     winZonePos[0] = worldWidthMeters / 1.0f;
     winZonePos[1] = worldHeightMeters * 0.8f;
     
@@ -109,7 +161,7 @@ void PhysicsWorld::createWinZone() {
     
     b2FixtureDef fixtureDef;
     fixtureDef.shape = &box;
-    fixtureDef.isSensor = true; // Se atraviesa
+    fixtureDef.isSensor = true;
     
     winZoneBody->CreateFixture(&fixtureDef);
     contactListener.winZoneBody = winZoneBody;

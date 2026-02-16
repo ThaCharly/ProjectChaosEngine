@@ -5,11 +5,19 @@
 #include <random>
 #include <set>
 
+// --- NUEVA ESTRUCTURA PARA PAREDES DINÁMICAS ---
+// Guardamos el puntero al cuerpo físico y sus dimensiones para poder editarlo
+struct CustomWall {
+    b2Body* body;
+    float width;
+    float height;
+};
+
 class ChaosContactListener : public b2ContactListener {
 public:
-    std::set<b2Body*> bodiesToCheck; // Para los glitches
-    b2Body* winZoneBody = nullptr;   // Referencia a la meta
-    b2Body* winnerBody = nullptr;    // El racer que tocó la meta
+    std::set<b2Body*> bodiesToCheck;
+    b2Body* winZoneBody = nullptr;
+    b2Body* winnerBody = nullptr;
 
     void BeginContact(b2Contact* contact) override {
         b2Fixture* fa = contact->GetFixtureA();
@@ -18,7 +26,6 @@ public:
         b2Body* bodyA = fa->GetBody();
         b2Body* bodyB = fb->GetBody();
 
-        // 1. Detección de Victoria
         if (winZoneBody) {
             if (bodyA == winZoneBody && bodyB->GetType() == b2_dynamicBody) {
                 winnerBody = bodyB;
@@ -28,7 +35,6 @@ public:
             }
         }
 
-        // 2. Lógica de Glitches (La de siempre)
         if (fa->GetBody()->GetType() == b2_dynamicBody) bodiesToCheck.insert(fa->GetBody());
         if (fb->GetBody()->GetType() == b2_dynamicBody) bodiesToCheck.insert(fb->GetBody());
     }
@@ -41,35 +47,44 @@ public:
     void step(float timeStep, int velocityIterations, int positionIterations);
 
     const std::vector<b2Body*>& getDynamicBodies() const;
-    b2Body* getWinZoneBody() const; // Para dibujarlo
+    b2Body* getWinZoneBody() const;
     void resetRacers();
+
+    // --- NUEVOS MÉTODOS PARA GESTIÓN DE PAREDES ---
+    // Crea una pared nueva en el centro
+    void addCustomWall(float x, float y, float w, float h);
+    // Modifica una pared existente (requiere borrar y crear fixture)
+    void updateCustomWall(int index, float x, float y, float w, float h);
+    // Borra una pared del mundo y del vector
+    void removeCustomWall(int index);
+    // Getter para dibujar las paredes en el main
+    const std::vector<CustomWall>& getCustomWalls() const;
 
     static constexpr float SCALE = 30.0f;
 
-    void updateRacerSize(float newSize);       // Recrea la forma física
-    void updateRestitution(float newRest);     // Cambia el rebote
-    void updateFixedRotation(bool fixed);      // Traba/Destraba rotación
+    void updateRacerSize(float newSize);
+    void updateRestitution(float newRest);
+    void updateFixedRotation(bool fixed);
     void updateFriction(float newFriction);
     void updateWinZone(float x, float y, float w, float h);
+    
     float currentRacerSize = 1.0f;
     float currentRestitution = 1.0f;
     float currentFriction = 0.0f;
     bool currentFixedRotation = true;
 
-
-    float targetSpeed = 15.0f;     // Velocidad objetivo
-    bool enforceSpeed = true;      // ¿Forzamos la velocidad constante?
-    bool enableGravity = false;    // Por si querés probar gravedad
+    float targetSpeed = 15.0f;
+    bool enforceSpeed = true;
+    bool enableGravity = false;
     bool isPaused = false;
 
-    bool enableChaos = false;      // Switch maestro para glitches
-    float chaosChance = 0.05f;    // 5% probabilidad
-    float chaosBoost = 1.5f;      // Multiplicador de empuje
+    bool enableChaos = false;
+    float chaosChance = 0.05f;
+    float chaosBoost = 1.5f;
 
     bool gameOver = false;
-    int winnerIndex = -1; // 0 a 3, o -1 si nadie ganó
+    int winnerIndex = -1;
 
-    // Datos de la Meta (para la UI)
     float winZonePos[2] = {0.0f, 0.0f};
     float winZoneSize[2] = {2.0f, 2.0f};
 
@@ -82,6 +97,10 @@ private:
 
     b2World world;
     std::vector<b2Body*> dynamicBodies;
+    
+    // --- VECTOR DE PAREDES CREADAS ---
+    std::vector<CustomWall> customWalls;
+
     b2Body* winZoneBody = nullptr;
 
     ChaosContactListener contactListener;

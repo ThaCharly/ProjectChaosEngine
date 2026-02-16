@@ -14,7 +14,6 @@ namespace fs = std::filesystem;
 
 int main()
 {
-    // --- CONFIGURACIÓN BASE ---
     const unsigned int WIDTH = 720;
     const unsigned int HEIGHT = 720;
     const unsigned int FPS = 60;
@@ -28,20 +27,16 @@ int main()
         return -1;
     }
 
-    // 1. FÍSICA E INICIALIZACIÓN
     PhysicsWorld physics(WIDTH, HEIGHT);
-    physics.isPaused = true; // Arrancamos en PAUSA
+    physics.isPaused = true; 
 
-    // 2. SISTEMA DE ARCHIVOS
     fs::path videoPath(VIDEO_DIRECTORY);
     fs::path outputDir = videoPath.parent_path();
     if (!fs::exists(outputDir)) fs::create_directories(outputDir);
 
-    // 3. GRABADORA
     Recorder recorder(WIDTH, HEIGHT, FPS, VIDEO_DIRECTORY);
-    recorder.isRecording = false; // Arrancamos SIN GRABAR
+    recorder.isRecording = false; 
 
-    // 4. RELOJES
     const float timeStep = 1.0f / 60.0f;
     int32 velIter = 8;
     int32 posIter = 3;
@@ -50,26 +45,21 @@ int main()
     sf::Clock deltaClock;
     float accumulator = 0.0f;
 
-    // --- DATOS PARA LA UI (ESTO FALTABA) ---
-    // Nombres para mostrar en el inspector
     const char* racerNames[] = { "Cyan", "Magenta", "Green", "Yellow" };
     
-    // Colores para los headers de ImGui
     ImVec4 guiColors[] = {
-        ImVec4(0, 1, 1, 1),   // Cyan
-        ImVec4(1, 0, 1, 1),   // Magenta
-        ImVec4(0, 1, 0, 1),   // Green
-        ImVec4(1, 1, 0, 1)    // Yellow
+        ImVec4(0, 1, 1, 1),   
+        ImVec4(1, 0, 1, 1),   
+        ImVec4(0, 1, 0, 1),   
+        ImVec4(1, 1, 0, 1)    
     };
 
-    // Colores para dibujar en SFML
     sf::Color racerColors[] = {
         sf::Color::Cyan, sf::Color::Magenta, sf::Color::Green, sf::Color::Yellow
     };
 
     while (window.isOpen()) {
 
-        // --- EVENTOS ---
         sf::Event event;
         while (window.pollEvent(event)) {
             ImGui::SFML::ProcessEvent(window, event);
@@ -84,11 +74,10 @@ int main()
         // ============================================================
         
         ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(350, 550), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(350, 650), ImGuiCond_FirstUseEver); // Agrandé para que entren las walls
         
         ImGui::Begin("Director Control", nullptr);
 
-        // A. CÁMARA (GRABACIÓN)
         ImGui::TextColored(ImVec4(1, 0.2f, 0.2f, 1), "CAMERA & ACTION");
         if (recorder.isRecording) {
             ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor::HSV(0.0f, 0.6f, 0.6f));
@@ -104,7 +93,6 @@ int main()
             ImGui::PopStyleColor(3);
         }
 
-        // B. SIMULACIÓN
         ImGui::Spacing();
         if (physics.isPaused) {
             if (ImGui::Button("RESUME PHYS", ImVec2(-1, 30))) physics.isPaused = false;
@@ -115,7 +103,57 @@ int main()
 
         ImGui::Separator();
 
-        // C. LA META
+        // --- SECCION NUEVA: WALL BUILDER ---
+        ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "WALL BUILDER");
+        
+        // Botón grande para crear pared en el centro
+        if (ImGui::Button("ADD WALL", ImVec2(-1, 30))) {
+            // Crea una pared de 10x1 metros en el centro aprox
+            physics.addCustomWall(12.0f, 20.0f, 10.0f, 1.0f);
+        }
+
+        ImGui::Spacing();
+        ImGui::Text("Custom Walls List:");
+        
+        // Iteramos las paredes existentes para mostrar sus controles
+        // Usamos una copia del vector o índices para evitar problemas si borramos
+        const auto& walls = physics.getCustomWalls();
+        int wallToDelete = -1; // Marcamos para borrar después del loop
+
+        for (int i = 0; i < walls.size(); ++i) {
+            ImGui::PushID(i);
+            
+            std::string label = "Wall " + std::to_string(i);
+            if (ImGui::CollapsingHeader(label.c_str())) {
+                CustomWall w = walls[i]; // Copia local para leer
+                
+                // Variables temporales para los sliders
+                float pos[2] = { w.body->GetPosition().x, w.body->GetPosition().y };
+                float size[2] = { w.width, w.height };
+                bool changed = false;
+
+                changed |= ImGui::DragFloat2("Position", pos, 0.1f);
+                changed |= ImGui::DragFloat2("Size", size, 0.1f, 0.5f, 30.0f);
+
+                if (changed) {
+                    physics.updateCustomWall(i, pos[0], pos[1], size[0], size[1]);
+                }
+
+                if (ImGui::Button("DELETE WALL", ImVec2(-1, 20))) {
+                    wallToDelete = i;
+                }
+            }
+            ImGui::PopID();
+        }
+
+        // Borramos si se pidió
+        if (wallToDelete != -1) {
+            physics.removeCustomWall(wallToDelete);
+        }
+        // -----------------------------------
+
+        ImGui::Separator();
+
         ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), "WIN ZONE CONFIG");
         bool updateZone = false;
         updateZone |= ImGui::DragFloat2("Posicion (m)", physics.winZonePos, 0.1f);
@@ -127,7 +165,6 @@ int main()
 
         ImGui::Separator();
 
-        // D. CAOS Y GRAVEDAD
         ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "GLOBAL PHYSICS");
         ImGui::Checkbox("Enable Gravity", &physics.enableGravity);
         ImGui::Checkbox("Enable Glitches (Chaos)", &physics.enableChaos);
@@ -136,7 +173,7 @@ int main()
             ImGui::SliderFloat("Chaos Boost", &physics.chaosBoost, 1.0f, 3.0f);
         }
         
-        ImGui::End(); // Fin Ventana 1
+        ImGui::End(); 
 
 
         // ============================================================
@@ -148,7 +185,6 @@ int main()
 
         ImGui::Begin("Racer Inspector", nullptr);
 
-        // A. CONFIGURACIÓN GLOBAL
         ImGui::TextColored(ImVec4(0.5f, 0.5f, 1.0f, 1), "FLEET SETTINGS");
         
         float size = physics.currentRacerSize;
@@ -171,7 +207,6 @@ int main()
 
         ImGui::Separator();
 
-        // B. INSPECTOR INDIVIDUAL
         ImGui::Text("INDIVIDUAL CONTROLS");
         
         const auto& bodies = physics.getDynamicBodies();
@@ -179,11 +214,9 @@ int main()
         for (size_t i = 0; i < bodies.size(); ++i) {
             b2Body* b = bodies[i];
             
-            // Usamos colores definidos arriba
             ImGui::PushStyleColor(ImGuiCol_Header, guiColors[i % 4]);
             ImGui::PushID((int)i);
 
-            // Nombre seguro para evitar ambigüedades
             std::string headerName;
             if (i < 4) {
                 headerName = std::string(racerNames[i]);
@@ -194,7 +227,6 @@ int main()
             if (ImGui::CollapsingHeader(headerName.c_str())) {
                 ImGui::PopStyleColor(); 
                 
-                // Posición
                 b2Vec2 pos = b->GetPosition();
                 float p[2] = { pos.x, pos.y };
                 if (ImGui::DragFloat2("Pos", p, 0.1f)) {
@@ -202,7 +234,6 @@ int main()
                     b->SetAwake(true);
                 }
 
-                // Velocidad
                 b2Vec2 vel = b->GetLinearVelocity();
                 float v[2] = { vel.x, vel.y };
                 if (ImGui::DragFloat2("Vel", v, 0.1f)) {
@@ -210,7 +241,6 @@ int main()
                     b->SetAwake(true);
                 }
 
-                // Info Rotación
                 float angleDeg = b->GetAngle() * 180.0f / 3.14159f;
                 ImGui::Text("Angle: %.1f deg", angleDeg);
                 if (ImGui::Button("Zero Rot")) {
@@ -224,7 +254,7 @@ int main()
             ImGui::PopID();
         }
 
-        ImGui::End(); // Fin Ventana 2
+        ImGui::End(); 
 
 
         // --- UPDATE FÍSICA ---
@@ -247,7 +277,28 @@ int main()
         // --- RENDER ---
         window.clear(sf::Color(18, 18, 18)); 
 
-        // Meta
+        // 1. DIBUJAR PAREDES CUSTOM (NUEVO)
+        const auto& customWalls = physics.getCustomWalls();
+        for (const auto& wall : customWalls) {
+            b2Vec2 pos = wall.body->GetPosition();
+            sf::RectangleShape r;
+            // Convertimos metros a pixeles
+            float wPx = wall.width * PhysicsWorld::SCALE;
+            float hPx = wall.height * PhysicsWorld::SCALE;
+            
+            r.setSize(sf::Vector2f(wPx, hPx));
+            r.setOrigin(wPx / 2.0f, hPx / 2.0f);
+            r.setPosition(pos.x * PhysicsWorld::SCALE, pos.y * PhysicsWorld::SCALE);
+            
+            // Estética de pared: Blanco suave/hueso
+            r.setFillColor(sf::Color(200, 200, 200)); 
+            r.setOutlineColor(sf::Color::White);
+            r.setOutlineThickness(1.0f);
+            
+            window.draw(r);
+        }
+
+        // 2. Win Zone
         b2Body* zone = physics.getWinZoneBody();
         if (zone) {
             b2Vec2 pos = zone->GetPosition();
@@ -263,7 +314,7 @@ int main()
             window.draw(zoneRect);
         }
 
-        // Racers
+        // 3. Racers
         for (size_t i = 0; i < bodies.size(); ++i) {
             b2Body* body = bodies[i];
             b2Vec2 pos = body->GetPosition();
