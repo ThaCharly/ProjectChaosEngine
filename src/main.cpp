@@ -38,6 +38,12 @@ sf::Texture createGridTexture(int width, int height) {
     return rt.getTexture();
 }
 
+void SoundManager::sendToRecorder(const sf::Int16* samples, std::size_t count, float vol) {
+    if (recorder) {
+        recorder->addAudioEvent(samples, count, vol);
+    }
+}
+
 int main()
 {
     const unsigned int WIDTH = 720;
@@ -65,6 +71,8 @@ int main()
 
     Recorder recorder(WIDTH, HEIGHT, FPS, VIDEO_DIRECTORY);
     recorder.isRecording = false; 
+
+    soundManager.setRecorder(&recorder);
 
     const float timeStep = 1.0f / 60.0f;
     int32 velIter = 8;
