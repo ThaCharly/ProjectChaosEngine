@@ -65,7 +65,7 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
     world.SetGravity(enableGravity ? b2Vec2(0.0f, 9.8f) : b2Vec2(0.0f, 0.0f));
     
     contactListener.bodiesToCheck.clear();
-    contactListener.wallsHit.clear(); // Limpiamos para el nuevo frame
+   // contactListener.wallsHit.clear(); // Limpiamos para el nuevo frame
     contactListener.winnerBody = nullptr;
 
     world.Step(timeStep, velIter, posIter);
@@ -113,17 +113,17 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
 }
 
 // --- ACTUALIZACIÓN VISUAL Y AUDIO (SIMPLIFICADO) ---
+// --- ACTUALIZACIÓN VISUAL Y AUDIO ---
 void PhysicsWorld::updateWallVisuals(float dt) {
     
+    // Recorremos las paredes que fueron golpeadas (acumuladas en los steps)
     for (b2Body* body : contactListener.wallsHit) {
-        // Buscamos qué pared del vector customWalls es este cuerpo
         for (auto& wall : customWalls) {
             if (wall.body == body) {
-                // 1. Efecto Visual
+                // 1. FLASH VISUAL
                 wall.flashTimer = 1.0f;
 
-                // 2. Efecto de Audio
-                // Si la pared tiene un ID > 0, suena. Sin importar la fuerza.
+                // 2. SONIDO
                 if (soundManager && wall.soundID > 0) {
                     soundManager->playSound(
                         wall.soundID, 
@@ -135,13 +135,17 @@ void PhysicsWorld::updateWallVisuals(float dt) {
         }
     }
 
-    // Fade out del flash visual
+    // Fade out
     for (auto& wall : customWalls) {
         if (wall.flashTimer > 0.0f) {
             wall.flashTimer -= dt * 3.0f;
             if (wall.flashTimer < 0.0f) wall.flashTimer = 0.0f;
         }
     }
+
+    // --- ¡AQUÍ ES DONDE SE LIMPIA! ---
+    // Limpiamos la lista DESPUÉS de haber procesado los choques
+    contactListener.wallsHit.clear();
 }
 
 // --- GUARDADO/CARGA (Sin cambios, ya soporta soundID) ---
@@ -278,5 +282,24 @@ void PhysicsWorld::updateFriction(float newFriction) { currentFriction=newFricti
 void PhysicsWorld::updateFixedRotation(bool fixed) { currentFixedRotation=fixed; for(auto b:dynamicBodies) { b->SetFixedRotation(fixed); b->SetAwake(true); } }
 const std::vector<b2Body*>& PhysicsWorld::getDynamicBodies() const { return dynamicBodies; }
 void PhysicsWorld::resetRacers() { int i=0; for(auto b:dynamicBodies){ float x=(worldWidthMeters/5.0f)*(i+1); float y=worldHeightMeters/2.0f; b->SetTransform(b2Vec2(x,y),0); b->SetLinearVelocity(b2Vec2(targetSpeed,targetSpeed)); b->SetAngularVelocity(0); b->SetAwake(true); i++; } gameOver=false; winnerIndex=-1; isPaused=true; }
-void PhysicsWorld::createWalls(float w, float h) { b2BodyDef bd; bd.type=b2_staticBody; b2PolygonShape s; b2FixtureDef fd; fd.shape=&s; fd.restitution=1; fd.friction=0; auto mw=[&](float x,float y,float wx,float wy){bd.position.Set(x,y); b2Body* b=world.CreateBody(&bd); s.SetAsBox(wx,wy); b->CreateFixture(&fd);}; mw(worldWidthMeters/2,worldHeightMeters,worldWidthMeters/2,0.5f); mw(worldWidthMeters/2,0,worldWidthMeters/2,0.5f); mw(0,worldHeightMeters/2,0.5f,worldHeightMeters/2); mw(worldWidthMeters,worldHeightMeters/2,0.5f,worldHeightMeters/2); }
+void PhysicsWorld::createWalls(float widthPixels, float heightPixels) {
+    float width = worldWidthMeters;
+    float height = worldHeightMeters;
+    float thick = 0.5f;
+
+    // Usamos addCustomWall para que sean "Paredes con ID"
+    // ID 1: Do (Piso)
+    // ID 2: Re (Techo)
+    // ID 3: Mi (Izq)
+    // ID 4: Fa (Der)
+    
+    // Abajo
+    addCustomWall(width / 2.0f, height, width / 2.0f, thick, 1);
+    // Arriba
+    addCustomWall(width / 2.0f, 0.0f, width / 2.0f, thick, 2);
+    // Izquierda
+    addCustomWall(0.0f, height / 2.0f, thick, height / 2.0f, 3);
+    // Derecha
+    addCustomWall(width, height / 2.0f, thick, height / 2.0f, 4);
+}
 void PhysicsWorld::createRacers() { float s=currentRacerSize; b2PolygonShape b; b.SetAsBox(s/2,s/2); b2FixtureDef fd; fd.shape=&b; fd.density=1; fd.friction=currentFriction; fd.restitution=currentRestitution; for(int i=0;i<4;++i){ b2BodyDef bd; bd.type=b2_dynamicBody; bd.bullet=true; bd.fixedRotation=currentFixedRotation; bd.position.Set((worldWidthMeters/5.0f)*(i+1), worldHeightMeters/2.0f); b2Body* bod=world.CreateBody(&bd); bod->CreateFixture(&fd); bod->SetLinearVelocity(b2Vec2(targetSpeed,targetSpeed)); dynamicBodies.push_back(bod); } }
