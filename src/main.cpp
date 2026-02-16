@@ -14,12 +14,13 @@ namespace fs = std::filesystem;
 
 int main()
 {
+    // --- CONFIGURACIÓN BASE ---
     const unsigned int WIDTH = 720;
     const unsigned int HEIGHT = 720;
     const unsigned int FPS = 60;
     const std::string VIDEO_DIRECTORY = "../output/video.mp4";
 
-    sf::RenderWindow window(sf::VideoMode(WIDTH, HEIGHT), "ChaosEngine - Director Mode");
+    sf::RenderWindow window(sf::VideoMode(WIDTH, HEIGHT), "ChaosEngine - Dual Deck");
     window.setFramerateLimit(FPS);
 
     if (!ImGui::SFML::Init(window)) {
@@ -27,155 +28,242 @@ int main()
         return -1;
     }
 
+    // 1. FÍSICA E INICIALIZACIÓN
     PhysicsWorld physics(WIDTH, HEIGHT);
-    physics.isPaused = true; // Pausamos al inicio para configurar la carrera antes de empezar
+    physics.isPaused = true; // Arrancamos en PAUSA
 
+    // 2. SISTEMA DE ARCHIVOS
     fs::path videoPath(VIDEO_DIRECTORY);
     fs::path outputDir = videoPath.parent_path();
-    if (!fs::exists(outputDir)) {
-        fs::create_directories(outputDir);
-    }
+    if (!fs::exists(outputDir)) fs::create_directories(outputDir);
 
+    // 3. GRABADORA
     Recorder recorder(WIDTH, HEIGHT, FPS, VIDEO_DIRECTORY);
-    recorder.isRecording = false;
+    recorder.isRecording = false; // Arrancamos SIN GRABAR
 
+    // 4. RELOJES
     const float timeStep = 1.0f / 60.0f;
-    int32 velocityIterations = 8;
-    int32 positionIterations = 3;
+    int32 velIter = 8;
+    int32 posIter = 3;
 
     sf::Clock clock;
     sf::Clock deltaClock;
     float accumulator = 0.0f;
 
-    // Colores para los racers
+    // --- DATOS PARA LA UI (ESTO FALTABA) ---
+    // Nombres para mostrar en el inspector
+    const char* racerNames[] = { "Cyan", "Magenta", "Green", "Yellow" };
+    
+    // Colores para los headers de ImGui
+    ImVec4 guiColors[] = {
+        ImVec4(0, 1, 1, 1),   // Cyan
+        ImVec4(1, 0, 1, 1),   // Magenta
+        ImVec4(0, 1, 0, 1),   // Green
+        ImVec4(1, 1, 0, 1)    // Yellow
+    };
+
+    // Colores para dibujar en SFML
     sf::Color racerColors[] = {
         sf::Color::Cyan, sf::Color::Magenta, sf::Color::Green, sf::Color::Yellow
     };
 
     while (window.isOpen()) {
 
+        // --- EVENTOS ---
         sf::Event event;
         while (window.pollEvent(event)) {
             ImGui::SFML::ProcessEvent(window, event);
-            if (event.type == sf::Event::Closed)
-                window.close();
-            if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::Escape)
-                window.close();
+            if (event.type == sf::Event::Closed) window.close();
+            if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::Escape) window.close();
         }
 
         ImGui::SFML::Update(window, deltaClock.restart());
 
-        // --- DIRECTOR CONSOLE (Panel de Control Completo) ---
-        ImGui::Begin("Chaos Director");
+        // ============================================================
+        //                VENTANA 1: DIRECTOR DECK
+        // ============================================================
+        
+        ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(350, 550), ImGuiCond_FirstUseEver);
+        
+        ImGui::Begin("Director Control", nullptr);
 
-        ImGui::TextColored(ImVec4(1, 0.2f, 0.2f, 1), "CAMERA CONTROL");
+        // A. CÁMARA (GRABACIÓN)
+        ImGui::TextColored(ImVec4(1, 0.2f, 0.2f, 1), "CAMERA & ACTION");
         if (recorder.isRecording) {
-            // Botón Rojo parpadeante o fijo que dice "STOP REC"
             ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor::HSV(0.0f, 0.6f, 0.6f));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor::HSV(0.0f, 0.7f, 0.7f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, (ImVec4)ImColor::HSV(0.0f, 0.8f, 0.8f));
-            if (ImGui::Button("STOP RECORDING [REC]", ImVec2(-1, 40))) {
-                recorder.isRecording = false;
-            }
+            if (ImGui::Button("STOP REC", ImVec2(-1, 40))) recorder.isRecording = false;
             ImGui::PopStyleColor(3);
-            ImGui::Text("Status: RECORDING TO DISK");
         } else {
-            // Botón Verde que dice "START REC"
             ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor::HSV(0.33f, 0.6f, 0.6f));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor::HSV(0.33f, 0.7f, 0.7f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, (ImVec4)ImColor::HSV(0.33f, 0.8f, 0.8f));
-            if (ImGui::Button("START RECORDING", ImVec2(-1, 40))) {
-                recorder.isRecording = true;
-            }
+            if (ImGui::Button("START REC", ImVec2(-1, 40))) recorder.isRecording = true;
             ImGui::PopStyleColor(3);
-            ImGui::TextDisabled("Status: STANDBY (Not recording)");
         }
-        
+
+        // B. SIMULACIÓN
+        ImGui::Spacing();
+        if (physics.isPaused) {
+            if (ImGui::Button("RESUME PHYS", ImVec2(-1, 30))) physics.isPaused = false;
+        } else {
+            if (ImGui::Button("PAUSE PHYS", ImVec2(-1, 30))) physics.isPaused = true;
+        }
+        if (ImGui::Button("RESET RACE (Positions)", ImVec2(-1, 20))) physics.resetRacers();
+
         ImGui::Separator();
-        
-        // 1. CONTROL DE LA META (WIN ZONE)
-        ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), "WIN ZONE SETTINGS");
+
+        // C. LA META
+        ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), "WIN ZONE CONFIG");
         bool updateZone = false;
         updateZone |= ImGui::DragFloat2("Posicion (m)", physics.winZonePos, 0.1f);
-        updateZone |= ImGui::DragFloat2("Tamaño (m)", physics.winZoneSize, 0.1f, 0.1f, 20.0f);
-        
+        updateZone |= ImGui::DragFloat2("Tamaño (m)", physics.winZoneSize, 0.1f, 0.1f, 30.0f);
         if (updateZone) {
             physics.updateWinZone(physics.winZonePos[0], physics.winZonePos[1], 
                                   physics.winZoneSize[0], physics.winZoneSize[1]);
         }
 
         ImGui::Separator();
+
+        // D. CAOS Y GRAVEDAD
+        ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "GLOBAL PHYSICS");
+        ImGui::Checkbox("Enable Gravity", &physics.enableGravity);
+        ImGui::Checkbox("Enable Glitches (Chaos)", &physics.enableChaos);
+        if (physics.enableChaos) {
+            ImGui::SliderFloat("Chaos %", &physics.chaosChance, 0.0f, 0.5f);
+            ImGui::SliderFloat("Chaos Boost", &physics.chaosBoost, 1.0f, 3.0f);
+        }
         
-        // 2. GLITCHES
-        ImGui::TextColored(ImVec4(1, 0.4f, 0, 1), "CHAOS ENGINE");
-        ImGui::Checkbox("Enable Glitches", &physics.enableChaos);
-        ImGui::SliderFloat("Glitch Chance", &physics.chaosChance, 0.0f, 0.5f, "%.2f");
-        ImGui::SliderFloat("Glitch Boost", &physics.chaosBoost, 1.0f, 3.0f, "x%.1f");
+        ImGui::End(); // Fin Ventana 1
 
-        ImGui::Separator();
 
-        // 3. FÍSICA Y CONTROLES
-        if (physics.isPaused) {
-            if (ImGui::Button("RESUME", ImVec2(-1, 40))) physics.isPaused = false;
-        } else {
-            if (ImGui::Button("PAUSE", ImVec2(-1, 40))) physics.isPaused = true;
+        // ============================================================
+        //                VENTANA 2: RACER INSPECTOR
+        // ============================================================
+        
+        ImGui::SetNextWindowPos(ImVec2(370, 10), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(340, 600), ImGuiCond_FirstUseEver);
+
+        ImGui::Begin("Racer Inspector", nullptr);
+
+        // A. CONFIGURACIÓN GLOBAL
+        ImGui::TextColored(ImVec4(0.5f, 0.5f, 1.0f, 1), "FLEET SETTINGS");
+        
+        float size = physics.currentRacerSize;
+        if (ImGui::DragFloat("Size (m)", &size, 0.05f, 0.1f, 10.0f, "%.2f")) {
+            physics.updateRacerSize(size);
+        }
+
+        float rest = physics.currentRestitution;
+        if (ImGui::DragFloat("Bounce", &rest, 0.01f, 0.0f, 2.0f, "%.2f")) {
+            physics.updateRestitution(rest);
+        }
+
+        bool fixedRot = physics.currentFixedRotation;
+        if (ImGui::Checkbox("Fixed Rotation", &fixedRot)) {
+            physics.updateFixedRotation(fixedRot);
         }
 
         ImGui::Checkbox("Enforce Speed", &physics.enforceSpeed);
-        ImGui::DragFloat("Target Speed", &physics.targetSpeed, 0.5f, 0.0f, 100.0f);
+        ImGui::DragFloat("Target Vel", &physics.targetSpeed, 0.5f, 0.0f, 100.0f, "%.1f m/s");
+
+        ImGui::Separator();
+
+        // B. INSPECTOR INDIVIDUAL
+        ImGui::Text("INDIVIDUAL CONTROLS");
         
-        float size = physics.currentRacerSize;
-        if (ImGui::DragFloat("Racer Size", &size, 0.05f, 0.1f, 5.0f)) physics.updateRacerSize(size);
+        const auto& bodies = physics.getDynamicBodies();
+        
+        for (size_t i = 0; i < bodies.size(); ++i) {
+            b2Body* b = bodies[i];
+            
+            // Usamos colores definidos arriba
+            ImGui::PushStyleColor(ImGuiCol_Header, guiColors[i % 4]);
+            ImGui::PushID((int)i);
 
-        float rest = physics.currentRestitution;
-        if (ImGui::DragFloat("Bounciness", &rest, 0.01f, 0.0f, 2.0f)) physics.updateRestitution(rest);
+            // Nombre seguro para evitar ambigüedades
+            std::string headerName;
+            if (i < 4) {
+                headerName = std::string(racerNames[i]);
+            } else {
+                headerName = "Racer " + std::to_string(i);
+            }
+            
+            if (ImGui::CollapsingHeader(headerName.c_str())) {
+                ImGui::PopStyleColor(); 
+                
+                // Posición
+                b2Vec2 pos = b->GetPosition();
+                float p[2] = { pos.x, pos.y };
+                if (ImGui::DragFloat2("Pos", p, 0.1f)) {
+                    b->SetTransform(b2Vec2(p[0], p[1]), b->GetAngle());
+                    b->SetAwake(true);
+                }
 
-        bool fixedRot = physics.currentFixedRotation;
-        if (ImGui::Checkbox("Fixed Rotation", &fixedRot)) physics.updateFixedRotation(fixedRot);
+                // Velocidad
+                b2Vec2 vel = b->GetLinearVelocity();
+                float v[2] = { vel.x, vel.y };
+                if (ImGui::DragFloat2("Vel", v, 0.1f)) {
+                    b->SetLinearVelocity(b2Vec2(v[0], v[1]));
+                    b->SetAwake(true);
+                }
 
-        if (ImGui::Button("RESET RACE", ImVec2(-1, 30))) physics.resetRacers();
+                // Info Rotación
+                float angleDeg = b->GetAngle() * 180.0f / 3.14159f;
+                ImGui::Text("Angle: %.1f deg", angleDeg);
+                if (ImGui::Button("Zero Rot")) {
+                    b->SetTransform(b->GetPosition(), 0.0f);
+                    b->SetAngularVelocity(0.0f);
+                }
 
-        ImGui::End();
-        // ----------------------------------------------------
-
-        sf::Time dt = clock.restart();
-        accumulator += dt.asSeconds();
-
-        while (accumulator >= timeStep) {
-            physics.step(timeStep, velocityIterations, positionIterations);
-            accumulator -= timeStep;
+            } else {
+                ImGui::PopStyleColor();
+            }
+            ImGui::PopID();
         }
 
-        // CHECK VICTORY
+        ImGui::End(); // Fin Ventana 2
+
+
+        // --- UPDATE FÍSICA ---
+        sf::Time dt = clock.restart();
+        if (!physics.isPaused) {
+            accumulator += dt.asSeconds();
+            while (accumulator >= timeStep) {
+                physics.step(timeStep, velIter, posIter);
+                accumulator -= timeStep;
+            }
+        } else {
+            accumulator = 0.0f;
+        }
+
         if (physics.gameOver) {
-            std::cout << ">>> SIMULACIÓN TERMINADA. Ganador: Racer " << physics.winnerIndex << std::endl;
+            std::cout << ">>> WINNER: " << physics.winnerIndex << std::endl;
             window.close();
         }
 
+        // --- RENDER ---
         window.clear(sf::Color(18, 18, 18)); 
 
-        // 1. DIBUJAR WIN ZONE (Fondo)
+        // Meta
         b2Body* zone = physics.getWinZoneBody();
         if (zone) {
             b2Vec2 pos = zone->GetPosition();
             sf::RectangleShape zoneRect;
             float w = physics.winZoneSize[0] * PhysicsWorld::SCALE;
             float h = physics.winZoneSize[1] * PhysicsWorld::SCALE;
-            
             zoneRect.setSize(sf::Vector2f(w, h));
-            zoneRect.setOrigin(w / 2.0f, h / 2.0f);
+            zoneRect.setOrigin(w/2.0f, h/2.0f);
             zoneRect.setPosition(pos.x * PhysicsWorld::SCALE, pos.y * PhysicsWorld::SCALE);
-            
-            // Dorado transparente
             zoneRect.setFillColor(sf::Color(255, 215, 0, 80)); 
             zoneRect.setOutlineColor(sf::Color::Yellow);
             zoneRect.setOutlineThickness(2.0f);
-            
             window.draw(zoneRect);
         }
 
-        // 2. DIBUJAR RACERS
-        const auto& bodies = physics.getDynamicBodies();
+        // Racers
         for (size_t i = 0; i < bodies.size(); ++i) {
             b2Body* body = bodies[i];
             b2Vec2 pos = body->GetPosition();
@@ -186,7 +274,7 @@ int main()
             rect.setSize(sf::Vector2f(drawSize, drawSize));
             rect.setOrigin(drawSize / 2.0f, drawSize / 2.0f);
             rect.setPosition(pos.x * PhysicsWorld::SCALE, pos.y * PhysicsWorld::SCALE);
-            rect.setRotation(angle * 180.0f / b2_pi);
+            rect.setRotation(angle * 180.0f / 3.14159f);
 
             if (i < 4) rect.setFillColor(racerColors[i]);
             else rect.setFillColor(sf::Color::White);
@@ -194,10 +282,7 @@ int main()
             window.draw(rect);
         }
 
-        // 3. GRABAR (Video Limpio, sin GUI)
         recorder.addFrame(window);
-
-        // 4. GUI & DISPLAY
         ImGui::SFML::Render(window);
         window.display();
     }

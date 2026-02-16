@@ -1,4 +1,6 @@
 #include "PhysicsWorld.hpp"
+#include <SFML/Graphics.hpp>
+#include <SFML/Window.hpp>
 #include <cmath>
 #include <iostream>
 
