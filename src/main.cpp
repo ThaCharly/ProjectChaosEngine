@@ -6,42 +6,34 @@
 #include <iostream>
 #include <filesystem>
 #include <string>
-#include <deque> // Para el historial de posiciones
+#include <deque>
 
 #include "Physics/PhysicsWorld.hpp"
 #include "Recorder/Recorder.hpp"
+#include "Sound/SoundManager.hpp" // <--- Incluir
 
 namespace fs = std::filesystem;
 
-// --- CONFIGURACIÓN VISUAL ---
+// ... (Struct Trail y createGridTexture quedan igual) ...
 struct Trail {
     std::deque<sf::Vector2f> points;
     sf::Color color;
 };
 
-// Generar textura de grilla para el fondo
 sf::Texture createGridTexture(int width, int height) {
     sf::RenderTexture rt;
     rt.create(width, height);
-    rt.clear(sf::Color(10, 10, 10)); // Fondo casi negro (#0A0A0A)
-
+    rt.clear(sf::Color(10, 10, 10)); 
     sf::RectangleShape line;
-    line.setFillColor(sf::Color(30, 30, 30)); // Gris muy oscuro
-
-    // Líneas Verticales
+    line.setFillColor(sf::Color(30, 30, 30)); 
     line.setSize(sf::Vector2f(2.0f, (float)height));
-    for (int x = 0; x < width; x += 60) { // Cada 2 metros aprox
-        line.setPosition((float)x, 0.0f);
-        rt.draw(line);
+    for (int x = 0; x < width; x += 60) { 
+        line.setPosition((float)x, 0.0f); rt.draw(line);
     }
-
-    // Líneas Horizontales
     line.setSize(sf::Vector2f((float)width, 2.0f));
     for (int y = 0; y < height; y += 60) {
-        line.setPosition(0.0f, (float)y);
-        rt.draw(line);
+        line.setPosition(0.0f, (float)y); rt.draw(line);
     }
-
     rt.display();
     return rt.getTexture();
 }
@@ -58,7 +50,12 @@ int main()
 
     if (!ImGui::SFML::Init(window)) return -1;
 
-    PhysicsWorld physics(WIDTH, HEIGHT);
+    // 1. INICIALIZAR AUDIO (Sintetizador Automático)
+    SoundManager soundManager; 
+    // Ya no cargamos nada, el constructor generó los tonos.
+
+    // 2. FÍSICA
+    PhysicsWorld physics(WIDTH, HEIGHT, &soundManager);
     physics.isPaused = true; 
     const auto& bodies = physics.getDynamicBodies();
 
@@ -76,17 +73,15 @@ int main()
     sf::Clock clock;
     sf::Clock deltaClock;
     float accumulator = 0.0f;
-    float globalTime = 0.0f; // Para animaciones
+    float globalTime = 0.0f;
 
-    // --- COLORES & ESTÉTICA ---
     const char* racerNames[] = { "Cyan", "Magenta", "Green", "Yellow" };
     
-    // Paleta Neon
     sf::Color racerColors[] = {
-        sf::Color(0, 255, 255),   // Cyan Eléctrico
-        sf::Color(255, 0, 255),   // Magenta Hot
-        sf::Color(57, 255, 20),   // Verde Lima Neon
-        sf::Color(255, 215, 0)    // Amarillo Sol
+        sf::Color(0, 255, 255),   
+        sf::Color(255, 0, 255),   
+        sf::Color(57, 255, 20),   
+        sf::Color(255, 215, 0)    
     };
 
     ImVec4 guiColors[] = {
@@ -96,11 +91,9 @@ int main()
         ImVec4(1, 0.8f, 0, 1)    
     };
 
-    // Fondo pre-renderizado
     sf::Texture gridTexture = createGridTexture(WIDTH, HEIGHT);
     sf::Sprite background(gridTexture);
 
-    // Sistema de Trails
     std::vector<Trail> trails(4);
     for(int i=0; i<4; ++i) trails[i].color = racerColors[i];
 
@@ -117,11 +110,9 @@ int main()
 
         ImGui::SFML::Update(window, deltaClock.restart());
 
-        // --- UPDATE FÍSICA ---
         sf::Time dt = clock.restart();
         float dtSec = dt.asSeconds();
         
-        // Actualizamos efectos visuales de paredes siempre (para el fade out)
         physics.updateWallVisuals(dtSec);
         globalTime += dtSec;
 
@@ -135,24 +126,16 @@ int main()
             accumulator = 0.0f;
         }
 
-        // --- ACTUALIZAR TRAILS ---
         if (!physics.isPaused) {
-
+            
             for (size_t i = 0; i < bodies.size(); ++i) {
                 if (i >= trails.size()) break;
-                
                 b2Vec2 pos = bodies[i]->GetPosition();
                 sf::Vector2f p(pos.x * PhysicsWorld::SCALE, pos.y * PhysicsWorld::SCALE);
-                
                 trails[i].points.push_front(p);
-                
-                // Largo dinámico basado en velocidad
                 float speed = bodies[i]->GetLinearVelocity().Length();
-                size_t maxPoints = (size_t)(speed * 3.0f) + 10; // Base + Velocidad
-                
-                if (trails[i].points.size() > maxPoints) {
-                    trails[i].points.pop_back();
-                }
+                size_t maxPoints = (size_t)(speed * 3.0f) + 10; 
+                if (trails[i].points.size() > maxPoints) trails[i].points.pop_back();
             }
         }
 
@@ -161,13 +144,9 @@ int main()
             window.close();
         }
 
-        // ============================================================
-        //                VENTANA 1: DIRECTOR DECK
-        // ============================================================
-        
+        // --- IMGUI DIRECTOR ---
         ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(350, 700), ImGuiCond_FirstUseEver);
-        
+        ImGui::SetNextWindowSize(ImVec2(350, 750), ImGuiCond_FirstUseEver);
         ImGui::Begin("Director Control", nullptr);
 
         ImGui::TextColored(ImVec4(1, 0.2f, 0.2f, 1), "CAMERA & ACTION");
@@ -193,15 +172,12 @@ int main()
         }
         if (ImGui::Button("RESET RACE", ImVec2(-1, 20))) {
             physics.resetRacers();
-            for(auto& t : trails) t.points.clear(); // Limpiar estelas
+            for(auto& t : trails) t.points.clear();
         }
 
         ImGui::Separator();
-
-        // --- SISTEMA DE MAPAS ---
         ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, 1), "MAP SYSTEM");
         ImGui::InputText("Filename", mapFilename, IM_ARRAYSIZE(mapFilename));
-        
         if (ImGui::Button("SAVE MAP", ImVec2(100, 30))) physics.saveMap(mapFilename);
         ImGui::SameLine();
         if (ImGui::Button("LOAD MAP", ImVec2(100, 30))) {
@@ -210,198 +186,137 @@ int main()
         }
 
         ImGui::Separator();
-
-        // --- WALL BUILDER ---
         ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "WALL BUILDER");
         
+        // Selector de Sonido para la próxima pared
+        static int nextWallSoundID = 1;
+        // Mapeo simple de nombres de notas para ayudar
+        const char* noteNames[] = { "Mute", "Do (C4)", "Re (D4)", "Mi (E4)", "Fa (F4)", "Sol (G4)", "La (A4)", "Si (B4)", "Do (C5)" };
+        if (nextWallSoundID >= 0 && nextWallSoundID <= 8) {
+            ImGui::Text("Next Sound: %s", noteNames[nextWallSoundID]);
+        }
+        ImGui::SliderInt("Next Sound ID", &nextWallSoundID, 0, 8);
+
         if (ImGui::Button("ADD WALL", ImVec2(-1, 30))) {
-            physics.addCustomWall(12.0f, 20.0f, 10.0f, 1.0f);
+            physics.addCustomWall(12.0f, 20.0f, 10.0f, 1.0f, nextWallSoundID);
         }
 
         ImGui::Spacing();
         ImGui::Text("Custom Walls List:");
-        
-        const auto& walls = physics.getCustomWalls(); // Sin const para editar visuales si quisiera
+        const auto& walls = physics.getCustomWalls();
         int wallToDelete = -1;
 
         for (int i = 0; i < walls.size(); ++i) {
             ImGui::PushID(i);
             std::string label = "Wall " + std::to_string(i);
+            if (walls[i].soundID > 0) label += " [Note " + std::to_string(walls[i].soundID) + "]";
+
             if (ImGui::CollapsingHeader(label.c_str())) {
-                // Leer valores actuales
-                CustomWall w = walls[i]; // Copia
+                CustomWall w = walls[i];
                 float pos[2] = { w.body->GetPosition().x, w.body->GetPosition().y };
                 float size[2] = { w.width, w.height };
+                int snd = w.soundID;
                 bool changed = false;
 
                 changed |= ImGui::DragFloat2("Position", pos, 0.1f);
                 changed |= ImGui::DragFloat2("Size", size, 0.1f, 0.5f, 30.0f);
+                changed |= ImGui::SliderInt("Sound ID", &snd, 0, 8);
 
-                if (changed) {
-                    physics.updateCustomWall(i, pos[0], pos[1], size[0], size[1]);
-                }
-
-                if (ImGui::Button("DELETE WALL", ImVec2(-1, 20))) {
-                    wallToDelete = i;
-                }
+                if (changed) physics.updateCustomWall(i, pos[0], pos[1], size[0], size[1], snd);
+                if (ImGui::Button("DELETE WALL", ImVec2(-1, 20))) wallToDelete = i;
             }
             ImGui::PopID();
         }
-
         if (wallToDelete != -1) physics.removeCustomWall(wallToDelete);
 
         ImGui::Separator();
-
         ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), "WIN ZONE CONFIG");
         bool updateZone = false;
-        updateZone |= ImGui::DragFloat2("Posicion (m)", physics.winZonePos, 0.1f);
-        updateZone |= ImGui::DragFloat2("Tamaño (m)", physics.winZoneSize, 0.1f, 0.1f, 30.0f);
-        if (updateZone) {
-            physics.updateWinZone(physics.winZonePos[0], physics.winZonePos[1], 
-                                  physics.winZoneSize[0], physics.winZoneSize[1]);
-        }
+        updateZone |= ImGui::DragFloat2("Pos", physics.winZonePos, 0.1f);
+        updateZone |= ImGui::DragFloat2("Size", physics.winZoneSize, 0.1f);
+        if (updateZone) physics.updateWinZone(physics.winZonePos[0], physics.winZonePos[1], physics.winZoneSize[0], physics.winZoneSize[1]);
 
         ImGui::Separator();
-
         ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "GLOBAL PHYSICS");
-        ImGui::Checkbox("Enable Gravity", &physics.enableGravity);
-        ImGui::Checkbox("Enable Glitches (Chaos)", &physics.enableChaos);
+        ImGui::Checkbox("Gravity", &physics.enableGravity);
+        ImGui::Checkbox("Chaos", &physics.enableChaos);
         if (physics.enableChaos) {
             ImGui::SliderFloat("Chaos %", &physics.chaosChance, 0.0f, 0.5f);
-            ImGui::SliderFloat("Chaos Boost", &physics.chaosBoost, 1.0f, 3.0f);
+            ImGui::SliderFloat("Boost", &physics.chaosBoost, 1.0f, 3.0f);
         }
-        
-        ImGui::End(); 
+        ImGui::End();
 
-
-        // ============================================================
-        //                VENTANA 2: RACER INSPECTOR
-        // ============================================================
-        
+        // --- IMGUI RACER INSPECTOR ---
         ImGui::SetNextWindowPos(ImVec2(370, 10), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(340, 600), ImGuiCond_FirstUseEver);
-
         ImGui::Begin("Racer Inspector", nullptr);
-
-        ImGui::TextColored(ImVec4(0.5f, 0.5f, 1.0f, 1), "FLEET SETTINGS");
         
+        ImGui::TextColored(ImVec4(0.5f, 0.5f, 1.0f, 1), "FLEET SETTINGS");
         float size = physics.currentRacerSize;
-        if (ImGui::DragFloat("Size (m)", &size, 0.05f, 0.1f, 10.0f, "%.2f")) {
-            physics.updateRacerSize(size);
-        }
-
+        if (ImGui::DragFloat("Size", &size, 0.05f, 0.1f, 10.0f)) physics.updateRacerSize(size);
         float rest = physics.currentRestitution;
-        if (ImGui::DragFloat("Bounce", &rest, 0.01f, 0.0f, 2.0f, "%.2f")) {
-            physics.updateRestitution(rest);
-        }
-
+        if (ImGui::DragFloat("Bounce", &rest, 0.01f, 0.0f, 2.0f)) physics.updateRestitution(rest);
         bool fixedRot = physics.currentFixedRotation;
-        if (ImGui::Checkbox("Fixed Rotation", &fixedRot)) {
-            physics.updateFixedRotation(fixedRot);
-        }
-
+        if (ImGui::Checkbox("Fixed Rotation", &fixedRot)) physics.updateFixedRotation(fixedRot);
         ImGui::Checkbox("Enforce Speed", &physics.enforceSpeed);
-        ImGui::DragFloat("Target Vel", &physics.targetSpeed, 0.5f, 0.0f, 100.0f, "%.1f m/s");
+        ImGui::DragFloat("Target Vel", &physics.targetSpeed, 0.5f, 0.0f, 100.0f);
 
         ImGui::Separator();
-
         ImGui::Text("INDIVIDUAL CONTROLS");
-        
-
-        
         for (size_t i = 0; i < bodies.size(); ++i) {
             b2Body* b = bodies[i];
-            
             ImGui::PushStyleColor(ImGuiCol_Header, guiColors[i % 4]);
             ImGui::PushID((int)i);
-
-            std::string headerName;
-            if (i < 4) {
-                headerName = std::string(racerNames[i]);
-            } else {
-                headerName = "Racer " + std::to_string(i);
-            }
-            
+            std::string headerName = (i < 4) ? std::string(racerNames[i]) : "Racer " + std::to_string(i);
             if (ImGui::CollapsingHeader(headerName.c_str())) {
                 ImGui::PopStyleColor(); 
-                
-                b2Vec2 pos = b->GetPosition();
-                float p[2] = { pos.x, pos.y };
-                if (ImGui::DragFloat2("Pos", p, 0.1f)) {
-                    b->SetTransform(b2Vec2(p[0], p[1]), b->GetAngle());
-                    b->SetAwake(true);
-                }
-
-                b2Vec2 vel = b->GetLinearVelocity();
-                float v[2] = { vel.x, vel.y };
-                if (ImGui::DragFloat2("Vel", v, 0.1f)) {
-                    b->SetLinearVelocity(b2Vec2(v[0], v[1]));
-                    b->SetAwake(true);
-                }
-
-                float angleDeg = b->GetAngle() * 180.0f / 3.14159f;
-                ImGui::Text("Angle: %.1f deg", angleDeg);
-                if (ImGui::Button("Zero Rot")) {
-                    b->SetTransform(b->GetPosition(), 0.0f);
-                    b->SetAngularVelocity(0.0f);
-                }
-
+                b2Vec2 pos = b->GetPosition(); float p[2] = { pos.x, pos.y };
+                if (ImGui::DragFloat2("Pos", p, 0.1f)) { b->SetTransform(b2Vec2(p[0], p[1]), b->GetAngle()); b->SetAwake(true); }
+                b2Vec2 vel = b->GetLinearVelocity(); float v[2] = { vel.x, vel.y };
+                if (ImGui::DragFloat2("Vel", v, 0.1f)) { b->SetLinearVelocity(b2Vec2(v[0], v[1])); b->SetAwake(true); }
             } else {
                 ImGui::PopStyleColor();
             }
             ImGui::PopID();
         }
-
         ImGui::End(); 
 
+        // --- DRAW ---
+        window.clear();
+        window.draw(background);
 
-        // --- RENDER ---
-        window.clear(); 
-        window.draw(background); // 1. Fondo Grid
-
-        // 2. DIBUJAR PAREDES CUSTOM (Con Flash)
         const auto& customWalls = physics.getCustomWalls();
         for (const auto& wall : customWalls) {
             b2Vec2 pos = wall.body->GetPosition();
             sf::RectangleShape r;
             float wPx = wall.width * PhysicsWorld::SCALE;
             float hPx = wall.height * PhysicsWorld::SCALE;
-            
             r.setSize(sf::Vector2f(wPx, hPx));
             r.setOrigin(wPx / 2.0f, hPx / 2.0f);
             r.setPosition(pos.x * PhysicsWorld::SCALE, pos.y * PhysicsWorld::SCALE);
             
-            // Lógica de color reactiva
-            // Base: Gris Acero (#404040) -> Flash: Blanco
             sf::Color baseColor(64, 64, 64);
             sf::Color flashColor(255, 255, 255);
-            
-            // Interpolación manual (lerp)
-            float t = wall.flashTimer; // 0 a 1
+            float t = wall.flashTimer; 
             sf::Color drawColor;
             drawColor.r = (sf::Uint8)(baseColor.r + (flashColor.r - baseColor.r) * t);
             drawColor.g = (sf::Uint8)(baseColor.g + (flashColor.g - baseColor.g) * t);
             drawColor.b = (sf::Uint8)(baseColor.b + (flashColor.b - baseColor.b) * t);
             
             r.setFillColor(drawColor); 
-            r.setOutlineColor(sf::Color(200, 200, 200)); // Borde claro fijo
+            r.setOutlineColor(sf::Color(200, 200, 200));
             r.setOutlineThickness(2.0f);
-            
             window.draw(r);
         }
 
-        // 3. Win Zone (Pulsing)
         b2Body* zone = physics.getWinZoneBody();
         if (zone) {
             b2Vec2 pos = zone->GetPosition();
             sf::RectangleShape zoneRect;
             float w = physics.winZoneSize[0] * PhysicsWorld::SCALE;
             float h = physics.winZoneSize[1] * PhysicsWorld::SCALE;
-            
-            // Efecto respiración
-            float pulse = (std::sin(globalTime * 3.0f) + 1.0f) * 0.5f; // 0 a 1
-            float alpha = 50.0f + pulse * 100.0f; // 50 a 150
-            
+            float pulse = (std::sin(globalTime * 3.0f) + 1.0f) * 0.5f; 
+            float alpha = 50.0f + pulse * 100.0f;
             zoneRect.setSize(sf::Vector2f(w, h));
             zoneRect.setOrigin(w/2.0f, h/2.0f);
             zoneRect.setPosition(pos.x * PhysicsWorld::SCALE, pos.y * PhysicsWorld::SCALE);
@@ -411,61 +326,43 @@ int main()
             window.draw(zoneRect);
         }
 
-        // 4. Racers & Trails
-        
-        
-        // A) Dibujar Trails primero (detrás)
         for (size_t i = 0; i < trails.size(); ++i) {
             const auto& pts = trails[i].points;
             if (pts.empty()) continue;
-
             sf::VertexArray va(sf::TriangleStrip, pts.size() * 2);
-            float width = 8.0f; // Grosor de la cinta
-
+            float width = 8.0f;
             for (size_t j = 0; j < pts.size(); ++j) {
-                // Cálculo de normal para grosor (simplificado, asume vertical si falla)
                 sf::Vector2f normal(1, 0);
                 if (j + 1 < pts.size()) {
                     sf::Vector2f dir = pts[j+1] - pts[j];
                     float len = std::sqrt(dir.x*dir.x + dir.y*dir.y);
                     if(len > 0.001f) normal = sf::Vector2f(-dir.y/len, dir.x/len);
                 }
-
-                // Fade out alpha basado en índice
                 float alphaPct = 1.0f - (float)j / (float)pts.size();
                 sf::Color c = trails[i].color;
-                c.a = (sf::Uint8)(alphaPct * 150.0f); // Max alpha 150
-
+                c.a = (sf::Uint8)(alphaPct * 150.0f);
                 va[j*2].position = pts[j] + normal * (width * alphaPct * 0.5f);
                 va[j*2].color = c;
-                
                 va[j*2+1].position = pts[j] - normal * (width * alphaPct * 0.5f);
                 va[j*2+1].color = c;
             }
             window.draw(va);
         }
 
-        // B) Dibujar Racers (Núcleo brillante)
         for (size_t i = 0; i < bodies.size(); ++i) {
             b2Body* body = bodies[i];
             b2Vec2 pos = body->GetPosition();
             float angle = body->GetAngle();
             float drawSize = physics.currentRacerSize * PhysicsWorld::SCALE;
-
             sf::RectangleShape rect;
             rect.setSize(sf::Vector2f(drawSize, drawSize));
             rect.setOrigin(drawSize / 2.0f, drawSize / 2.0f);
             rect.setPosition(pos.x * PhysicsWorld::SCALE, pos.y * PhysicsWorld::SCALE);
             rect.setRotation(angle * 180.0f / 3.14159f);
-
-            // Borde Color Equipo
             if (i < 4) rect.setOutlineColor(racerColors[i]);
             else rect.setOutlineColor(sf::Color::White);
-            
-            // Centro Blanco Brillante
             rect.setFillColor(sf::Color::White);
-            rect.setOutlineThickness(-3.0f); // Borde interno
-
+            rect.setOutlineThickness(-3.0f);
             window.draw(rect);
         }
 
