@@ -47,7 +47,7 @@ Recorder::~Recorder() {
 }
 
 void Recorder::addFrame(const sf::Window& window) {
-    if (!ffmpegPipe) return;
+    if (!ffmpegPipe || !isRecording) return;
 
     // Capturar el contenido de la ventana a una textura
     captureTexture.update(window);

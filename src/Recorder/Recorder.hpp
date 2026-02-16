@@ -11,6 +11,8 @@ public:
 
     void addFrame(const sf::Window& window);
 
+    bool isRecording = true;
+
 private:
     FILE* ffmpegPipe;
     int width;

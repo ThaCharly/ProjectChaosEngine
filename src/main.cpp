@@ -28,6 +28,7 @@ int main()
     }
 
     PhysicsWorld physics(WIDTH, HEIGHT);
+    physics.isPaused = true; // Pausamos al inicio para configurar la carrera antes de empezar
 
     fs::path videoPath(VIDEO_DIRECTORY);
     fs::path outputDir = videoPath.parent_path();
@@ -36,6 +37,7 @@ int main()
     }
 
     Recorder recorder(WIDTH, HEIGHT, FPS, VIDEO_DIRECTORY);
+    recorder.isRecording = false;
 
     const float timeStep = 1.0f / 60.0f;
     int32 velocityIterations = 8;
@@ -65,6 +67,31 @@ int main()
 
         // --- DIRECTOR CONSOLE (Panel de Control Completo) ---
         ImGui::Begin("Chaos Director");
+
+        ImGui::TextColored(ImVec4(1, 0.2f, 0.2f, 1), "CAMERA CONTROL");
+        if (recorder.isRecording) {
+            // Botón Rojo parpadeante o fijo que dice "STOP REC"
+            ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor::HSV(0.0f, 0.6f, 0.6f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor::HSV(0.0f, 0.7f, 0.7f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, (ImVec4)ImColor::HSV(0.0f, 0.8f, 0.8f));
+            if (ImGui::Button("STOP RECORDING [REC]", ImVec2(-1, 40))) {
+                recorder.isRecording = false;
+            }
+            ImGui::PopStyleColor(3);
+            ImGui::Text("Status: RECORDING TO DISK");
+        } else {
+            // Botón Verde que dice "START REC"
+            ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor::HSV(0.33f, 0.6f, 0.6f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor::HSV(0.33f, 0.7f, 0.7f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, (ImVec4)ImColor::HSV(0.33f, 0.8f, 0.8f));
+            if (ImGui::Button("START RECORDING", ImVec2(-1, 40))) {
+                recorder.isRecording = true;
+            }
+            ImGui::PopStyleColor(3);
+            ImGui::TextDisabled("Status: STANDBY (Not recording)");
+        }
+        
+        ImGui::Separator();
         
         // 1. CONTROL DE LA META (WIN ZONE)
         ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), "WIN ZONE SETTINGS");
