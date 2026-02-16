@@ -9,6 +9,7 @@ bin/
 .idea/
 output/
 output2/
+output22/
 
 CMakeFiles/
 CMakeCache.txt
