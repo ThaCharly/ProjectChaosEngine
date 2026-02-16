@@ -46,17 +46,18 @@ int main()
     float accumulator = 0.0f;
 
     const char* racerNames[] = { "Cyan", "Magenta", "Green", "Yellow" };
-    
     ImVec4 guiColors[] = {
         ImVec4(0, 1, 1, 1),   
         ImVec4(1, 0, 1, 1),   
         ImVec4(0, 1, 0, 1),   
         ImVec4(1, 1, 0, 1)    
     };
-
     sf::Color racerColors[] = {
         sf::Color::Cyan, sf::Color::Magenta, sf::Color::Green, sf::Color::Yellow
     };
+
+    // Buffer para el nombre del archivo de mapa
+    static char mapFilename[128] = "level_01.txt";
 
     while (window.isOpen()) {
 
@@ -74,7 +75,7 @@ int main()
         // ============================================================
         
         ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(350, 650), ImGuiCond_FirstUseEver); // Agrandé para que entren las walls
+        ImGui::SetNextWindowSize(ImVec2(350, 700), ImGuiCond_FirstUseEver); // Un poco más alta
         
         ImGui::Begin("Director Control", nullptr);
 
@@ -99,35 +100,42 @@ int main()
         } else {
             if (ImGui::Button("PAUSE PHYS", ImVec2(-1, 30))) physics.isPaused = true;
         }
-        if (ImGui::Button("RESET RACE (Positions)", ImVec2(-1, 20))) physics.resetRacers();
+        if (ImGui::Button("RESET RACE", ImVec2(-1, 20))) physics.resetRacers();
 
         ImGui::Separator();
 
-        // --- SECCION NUEVA: WALL BUILDER ---
+        // --- SISTEMA DE MAPAS ---
+        ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, 1), "MAP SYSTEM");
+        ImGui::InputText("Filename", mapFilename, IM_ARRAYSIZE(mapFilename));
+        
+        if (ImGui::Button("SAVE MAP", ImVec2(100, 30))) {
+            physics.saveMap(mapFilename);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("LOAD MAP", ImVec2(100, 30))) {
+            physics.loadMap(mapFilename);
+        }
+
+        ImGui::Separator();
+
+        // --- WALL BUILDER ---
         ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "WALL BUILDER");
         
-        // Botón grande para crear pared en el centro
         if (ImGui::Button("ADD WALL", ImVec2(-1, 30))) {
-            // Crea una pared de 10x1 metros en el centro aprox
             physics.addCustomWall(12.0f, 20.0f, 10.0f, 1.0f);
         }
 
         ImGui::Spacing();
         ImGui::Text("Custom Walls List:");
         
-        // Iteramos las paredes existentes para mostrar sus controles
-        // Usamos una copia del vector o índices para evitar problemas si borramos
         const auto& walls = physics.getCustomWalls();
-        int wallToDelete = -1; // Marcamos para borrar después del loop
+        int wallToDelete = -1;
 
         for (int i = 0; i < walls.size(); ++i) {
             ImGui::PushID(i);
-            
             std::string label = "Wall " + std::to_string(i);
             if (ImGui::CollapsingHeader(label.c_str())) {
-                CustomWall w = walls[i]; // Copia local para leer
-                
-                // Variables temporales para los sliders
+                CustomWall w = walls[i];
                 float pos[2] = { w.body->GetPosition().x, w.body->GetPosition().y };
                 float size[2] = { w.width, w.height };
                 bool changed = false;
@@ -146,11 +154,7 @@ int main()
             ImGui::PopID();
         }
 
-        // Borramos si se pidió
-        if (wallToDelete != -1) {
-            physics.removeCustomWall(wallToDelete);
-        }
-        // -----------------------------------
+        if (wallToDelete != -1) physics.removeCustomWall(wallToDelete);
 
         ImGui::Separator();
 
@@ -277,12 +281,11 @@ int main()
         // --- RENDER ---
         window.clear(sf::Color(18, 18, 18)); 
 
-        // 1. DIBUJAR PAREDES CUSTOM (NUEVO)
+        // 1. DIBUJAR PAREDES CUSTOM
         const auto& customWalls = physics.getCustomWalls();
         for (const auto& wall : customWalls) {
             b2Vec2 pos = wall.body->GetPosition();
             sf::RectangleShape r;
-            // Convertimos metros a pixeles
             float wPx = wall.width * PhysicsWorld::SCALE;
             float hPx = wall.height * PhysicsWorld::SCALE;
             
@@ -290,7 +293,6 @@ int main()
             r.setOrigin(wPx / 2.0f, hPx / 2.0f);
             r.setPosition(pos.x * PhysicsWorld::SCALE, pos.y * PhysicsWorld::SCALE);
             
-            // Estética de pared: Blanco suave/hueso
             r.setFillColor(sf::Color(200, 200, 200)); 
             r.setOutlineColor(sf::Color::White);
             r.setOutlineThickness(1.0f);

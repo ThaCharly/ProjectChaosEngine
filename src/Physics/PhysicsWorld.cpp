@@ -1,6 +1,8 @@
 #include "PhysicsWorld.hpp"
 #include <cmath>
 #include <iostream>
+#include <fstream> // Para archivos
+#include <sstream> // Para parsear texto
 
 PhysicsWorld::PhysicsWorld(float widthPixels, float heightPixels)
     : world(b2Vec2(0.0f, 0.0f)) 
@@ -75,52 +77,153 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
     }
 }
 
-// --- IMPLEMENTACIÓN DE CUSTOM WALLS ---
+// --- SISTEMA DE GUARDADO Y CARGA ---
+
+// --- SISTEMA DE GUARDADO Y CARGA (ACTUALIZADO) ---
+
+void PhysicsWorld::saveMap(const std::string& filename) {
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Error al guardar el mapa: " << filename << std::endl;
+        return;
+    }
+
+    // 1. Guardar Configuración Global (Opcional, pero útil)
+    file << "CONFIG " << targetSpeed << " " << currentRacerSize << " " 
+         << currentRestitution << " " << enableChaos << "\n";
+
+    // 2. Guardar Win Zone
+    file << "WINZONE " << winZonePos[0] << " " << winZonePos[1] << " " 
+         << winZoneSize[0] << " " << winZoneSize[1] << "\n";
+
+    // 3. Guardar Custom Walls
+    for (const auto& wall : customWalls) {
+        b2Vec2 pos = wall.body->GetPosition();
+        file << "WALL " << pos.x << " " << pos.y << " " 
+             << wall.width << " " << wall.height << "\n";
+    }
+
+    // 4. GUARDAR RACERS (Posición, Velocidad y Ángulo)
+    // Esto permite retomar la simulación exactamente donde quedó.
+    for (size_t i = 0; i < dynamicBodies.size(); ++i) {
+        b2Body* b = dynamicBodies[i];
+        b2Vec2 pos = b->GetPosition();
+        b2Vec2 vel = b->GetLinearVelocity();
+        float angle = b->GetAngle();
+        float angVel = b->GetAngularVelocity();
+
+        file << "RACER " << i << " " 
+             << pos.x << " " << pos.y << " " 
+             << vel.x << " " << vel.y << " " 
+             << angle << " " << angVel << "\n";
+    }
+
+    std::cout << "Mapa y estado guardados en " << filename << std::endl;
+    file.close();
+}
+
+void PhysicsWorld::loadMap(const std::string& filename) {
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Error al cargar el mapa: " << filename << std::endl;
+        return;
+    }
+
+    // 1. Limpieza total
+    clearCustomWalls();
+    
+    // 2. Reseteamos los racers a default primero.
+    // Si el archivo tiene datos de RACER, los sobreescribirá abajo.
+    // Si no tiene (mapa viejo), quedan en la grilla default.
+    resetRacers(); 
+
+    std::string line;
+    while (std::getline(file, line)) {
+        std::stringstream ss(line);
+        std::string type;
+        ss >> type;
+
+        if (type == "CONFIG") {
+            // Recuperamos configuraciones físicas básicas
+            float spd, size, rest;
+            bool chaos;
+            ss >> spd >> size >> rest >> chaos;
+            targetSpeed = spd;
+            enableChaos = chaos;
+            // Actualizamos física
+            updateRacerSize(size); 
+            updateRestitution(rest);
+        }
+        else if (type == "WINZONE") {
+            float x, y, w, h;
+            ss >> x >> y >> w >> h;
+            updateWinZone(x, y, w, h);
+        } 
+        else if (type == "WALL") {
+            float x, y, w, h;
+            ss >> x >> y >> w >> h;
+            addCustomWall(x, y, w, h);
+        }
+        else if (type == "RACER") {
+            // LEER ESTADO DEL RACER
+            int id;
+            float x, y, vx, vy, angle, angVel;
+            ss >> id >> x >> y >> vx >> vy >> angle >> angVel;
+
+            if (id >= 0 && id < dynamicBodies.size()) {
+                b2Body* b = dynamicBodies[id];
+                // Teletransportamos el cuerpo a lo guardado
+                b->SetTransform(b2Vec2(x, y), angle);
+                b->SetLinearVelocity(b2Vec2(vx, vy));
+                b->SetAngularVelocity(angVel);
+                b->SetAwake(true);
+            }
+        }
+    }
+
+    // Mantenemos la pausa para que veas lo que cargaste antes de que explote todo
+    isPaused = true;
+    std::cout << "Mapa cargado desde " << filename << std::endl;
+    file.close();
+}
+
+void PhysicsWorld::clearCustomWalls() {
+    for (const auto& wall : customWalls) {
+        world.DestroyBody(wall.body);
+    }
+    customWalls.clear();
+}
+
+// -----------------------------------
 
 void PhysicsWorld::addCustomWall(float x, float y, float w, float h) {
     b2BodyDef bd;
-    bd.type = b2_staticBody; // Estático para que reboten contra ella
+    bd.type = b2_staticBody;
     bd.position.Set(x, y);
-    
     b2Body* body = world.CreateBody(&bd);
-    
     b2PolygonShape box;
     box.SetAsBox(w / 2.0f, h / 2.0f);
-    
     b2FixtureDef fd;
     fd.shape = &box;
-    fd.friction = 0.0f;    // Sin fricción (Hielo)
-    fd.restitution = 1.0f; // Rebote perfecto
-    
+    fd.friction = 0.0f;
+    fd.restitution = 1.0f;
     body->CreateFixture(&fd);
-    
-    // Guardamos en el vector para administrarla después
     customWalls.push_back({body, w, h});
 }
 
 void PhysicsWorld::updateCustomWall(int index, float x, float y, float w, float h) {
     if (index < 0 || index >= customWalls.size()) return;
-    
     CustomWall& wall = customWalls[index];
-    
-    // 1. Mover el cuerpo
     wall.body->SetTransform(b2Vec2(x, y), 0.0f);
-    
-    // 2. Si cambió el tamaño, hay que recrear la fixture
     if (wall.width != w || wall.height != h) {
         wall.body->DestroyFixture(wall.body->GetFixtureList());
-        
         b2PolygonShape box;
         box.SetAsBox(w / 2.0f, h / 2.0f);
-        
         b2FixtureDef fd;
         fd.shape = &box;
         fd.friction = 0.0f;
         fd.restitution = 1.0f;
-        
         wall.body->CreateFixture(&fd);
-        
-        // Actualizamos los datos guardados
         wall.width = w;
         wall.height = h;
     }
@@ -128,11 +231,7 @@ void PhysicsWorld::updateCustomWall(int index, float x, float y, float w, float 
 
 void PhysicsWorld::removeCustomWall(int index) {
     if (index < 0 || index >= customWalls.size()) return;
-    
-    // Borramos el cuerpo físico de Box2D
     world.DestroyBody(customWalls[index].body);
-    
-    // Borramos de nuestro vector
     customWalls.erase(customWalls.begin() + index);
 }
 
@@ -140,48 +239,34 @@ const std::vector<CustomWall>& PhysicsWorld::getCustomWalls() const {
     return customWalls;
 }
 
-// --------------------------------------
-
-b2Body* PhysicsWorld::getWinZoneBody() const {
-    return winZoneBody;
-}
+b2Body* PhysicsWorld::getWinZoneBody() const { return winZoneBody; }
 
 void PhysicsWorld::createWinZone() {
     b2BodyDef bodyDef;
     bodyDef.type = b2_staticBody;
-    
-    winZonePos[0] = worldWidthMeters / 1.0f;
+    winZonePos[0] = worldWidthMeters / 1.0f; // Originalmente era / 2.0f, ajusté a tu última versión visible
     winZonePos[1] = worldHeightMeters * 0.8f;
-    
     bodyDef.position.Set(winZonePos[0], winZonePos[1]);
     winZoneBody = world.CreateBody(&bodyDef);
-    
     b2PolygonShape box;
     box.SetAsBox(winZoneSize[0] / 2.0f, winZoneSize[1] / 2.0f);
-    
     b2FixtureDef fixtureDef;
     fixtureDef.shape = &box;
     fixtureDef.isSensor = true;
-    
     winZoneBody->CreateFixture(&fixtureDef);
     contactListener.winZoneBody = winZoneBody;
 }
 
 void PhysicsWorld::updateWinZone(float x, float y, float w, float h) {
     if (!winZoneBody) return;
-    
     winZoneBody->SetTransform(b2Vec2(x, y), 0.0f);
     winZoneBody->DestroyFixture(winZoneBody->GetFixtureList());
-    
     b2PolygonShape box;
     box.SetAsBox(w / 2.0f, h / 2.0f);
-    
     b2FixtureDef fd;
     fd.shape = &box;
     fd.isSensor = true;
-    
     winZoneBody->CreateFixture(&fd);
-    
     winZonePos[0] = x; winZonePos[1] = y;
     winZoneSize[0] = w; winZoneSize[1] = h;
 }
@@ -192,13 +277,11 @@ void PhysicsWorld::updateRacerSize(float newSize) {
         b->DestroyFixture(b->GetFixtureList());
         b2PolygonShape dynamicBox;
         dynamicBox.SetAsBox(newSize / 2.0f, newSize / 2.0f);
-
         b2FixtureDef fixtureDef;
         fixtureDef.shape = &dynamicBox;
         fixtureDef.density = 1.0f;
         fixtureDef.friction = currentFriction;
         fixtureDef.restitution = currentRestitution;
-
         b->CreateFixture(&fixtureDef);
         b->SetAwake(true);
     }
@@ -206,11 +289,9 @@ void PhysicsWorld::updateRacerSize(float newSize) {
 
 void PhysicsWorld::updateRestitution(float newRest) {
     currentRestitution = newRest;
-    for (b2Body* b : dynamicBodies) {
-        for (b2Fixture* f = b->GetFixtureList(); f; f = f->GetNext()) {
+    for (b2Body* b : dynamicBodies)
+        for (b2Fixture* f = b->GetFixtureList(); f; f = f->GetNext())
             f->SetRestitution(newRest);
-        }
-    }
 }
 
 void PhysicsWorld::updateFriction(float newFriction) {
@@ -230,16 +311,13 @@ void PhysicsWorld::updateFixedRotation(bool fixed) {
     }
 }
 
-const std::vector<b2Body*>& PhysicsWorld::getDynamicBodies() const {
-    return dynamicBodies;
-}
+const std::vector<b2Body*>& PhysicsWorld::getDynamicBodies() const { return dynamicBodies; }
 
 void PhysicsWorld::resetRacers() {
     int i = 0;
     for (b2Body* b : dynamicBodies) {
         float x = (worldWidthMeters / 5.0f) * (i + 1);
         float y = worldHeightMeters / 2.0f;
-        
         b->SetTransform(b2Vec2(x, y), 0.0f);
         b->SetLinearVelocity(b2Vec2(targetSpeed, targetSpeed));
         b->SetAngularVelocity(0.0f);
@@ -248,13 +326,12 @@ void PhysicsWorld::resetRacers() {
     }
     gameOver = false;
     winnerIndex = -1;
-    isPaused = false;
+    isPaused = true; // Pausamos al resetear/cargar mapa para que puedas ver el setup
 }
 
 void PhysicsWorld::createWalls(float widthPixels, float heightPixels) {
     float width = worldWidthMeters;
     float height = worldHeightMeters;
-
     b2BodyDef wallBodyDef;
     wallBodyDef.type = b2_staticBody;
     b2Body* wall;
@@ -270,7 +347,6 @@ void PhysicsWorld::createWalls(float widthPixels, float heightPixels) {
         wallShape.SetAsBox(hx, hy);
         wall->CreateFixture(&fixtureDef);
     };
-
     makeWall(width/2.0f, height, width/2.0f, 0.5f); 
     makeWall(width/2.0f, 0.0f, width/2.0f, 0.5f);   
     makeWall(0.0f, height/2.0f, 0.5f, height/2.0f); 
@@ -281,7 +357,6 @@ void PhysicsWorld::createRacers() {
     float size = currentRacerSize;
     b2PolygonShape dynamicBox;
     dynamicBox.SetAsBox(size / 2.0f, size / 2.0f);
-
     b2FixtureDef fixtureDef;
     fixtureDef.shape = &dynamicBox;
     fixtureDef.density = 1.0f;
@@ -293,15 +368,12 @@ void PhysicsWorld::createRacers() {
         bodyDef.type = b2_dynamicBody;
         bodyDef.bullet = true;
         bodyDef.fixedRotation = currentFixedRotation;
-
         float x = (worldWidthMeters / 5.0f) * (i + 1);
         float y = worldHeightMeters / 2.0f;
         bodyDef.position.Set(x, y);
-
         b2Body* body = world.CreateBody(&bodyDef);
         body->CreateFixture(&fixtureDef);
         body->SetLinearVelocity(b2Vec2(targetSpeed, targetSpeed));
-
         dynamicBodies.push_back(body);
     }
 }

@@ -8,6 +8,7 @@ bin/
 .vscode/
 .idea/
 output/
+output2/
 
 CMakeFiles/
 CMakeCache.txt

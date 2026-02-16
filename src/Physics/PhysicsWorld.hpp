@@ -4,9 +4,9 @@
 #include <vector>
 #include <random>
 #include <set>
+#include <string> // Necesario para nombres de archivo
 
-// --- NUEVA ESTRUCTURA PARA PAREDES DINÁMICAS ---
-// Guardamos el puntero al cuerpo físico y sus dimensiones para poder editarlo
+// Estructura para paredes dinámicas
 struct CustomWall {
     b2Body* body;
     float width;
@@ -27,12 +27,8 @@ public:
         b2Body* bodyB = fb->GetBody();
 
         if (winZoneBody) {
-            if (bodyA == winZoneBody && bodyB->GetType() == b2_dynamicBody) {
-                winnerBody = bodyB;
-            }
-            else if (bodyB == winZoneBody && bodyA->GetType() == b2_dynamicBody) {
-                winnerBody = bodyA;
-            }
+            if (bodyA == winZoneBody && bodyB->GetType() == b2_dynamicBody) winnerBody = bodyB;
+            else if (bodyB == winZoneBody && bodyA->GetType() == b2_dynamicBody) winnerBody = bodyA;
         }
 
         if (fa->GetBody()->GetType() == b2_dynamicBody) bodiesToCheck.insert(fa->GetBody());
@@ -50,14 +46,15 @@ public:
     b2Body* getWinZoneBody() const;
     void resetRacers();
 
-    // --- NUEVOS MÉTODOS PARA GESTIÓN DE PAREDES ---
-    // Crea una pared nueva en el centro
+    // --- NUEVO SISTEMA DE MAPAS (SAVE/LOAD) ---
+    void saveMap(const std::string& filename);
+    void loadMap(const std::string& filename);
+    void clearCustomWalls(); // Borra todas las paredes creadas
+    // ------------------------------------------
+
     void addCustomWall(float x, float y, float w, float h);
-    // Modifica una pared existente (requiere borrar y crear fixture)
     void updateCustomWall(int index, float x, float y, float w, float h);
-    // Borra una pared del mundo y del vector
     void removeCustomWall(int index);
-    // Getter para dibujar las paredes en el main
     const std::vector<CustomWall>& getCustomWalls() const;
 
     static constexpr float SCALE = 30.0f;
@@ -98,7 +95,6 @@ private:
     b2World world;
     std::vector<b2Body*> dynamicBodies;
     
-    // --- VECTOR DE PAREDES CREADAS ---
     std::vector<CustomWall> customWalls;
 
     b2Body* winZoneBody = nullptr;
