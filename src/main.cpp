@@ -6,11 +6,45 @@
 #include <iostream>
 #include <filesystem>
 #include <string>
+#include <deque> // Para el historial de posiciones
 
 #include "Physics/PhysicsWorld.hpp"
 #include "Recorder/Recorder.hpp"
 
 namespace fs = std::filesystem;
+
+// --- CONFIGURACIÓN VISUAL ---
+struct Trail {
+    std::deque<sf::Vector2f> points;
+    sf::Color color;
+};
+
+// Generar textura de grilla para el fondo
+sf::Texture createGridTexture(int width, int height) {
+    sf::RenderTexture rt;
+    rt.create(width, height);
+    rt.clear(sf::Color(10, 10, 10)); // Fondo casi negro (#0A0A0A)
+
+    sf::RectangleShape line;
+    line.setFillColor(sf::Color(30, 30, 30)); // Gris muy oscuro
+
+    // Líneas Verticales
+    line.setSize(sf::Vector2f(2.0f, (float)height));
+    for (int x = 0; x < width; x += 60) { // Cada 2 metros aprox
+        line.setPosition((float)x, 0.0f);
+        rt.draw(line);
+    }
+
+    // Líneas Horizontales
+    line.setSize(sf::Vector2f((float)width, 2.0f));
+    for (int y = 0; y < height; y += 60) {
+        line.setPosition(0.0f, (float)y);
+        rt.draw(line);
+    }
+
+    rt.display();
+    return rt.getTexture();
+}
 
 int main()
 {
@@ -19,16 +53,14 @@ int main()
     const unsigned int FPS = 60;
     const std::string VIDEO_DIRECTORY = "../output/video.mp4";
 
-    sf::RenderWindow window(sf::VideoMode(WIDTH, HEIGHT), "ChaosEngine - Dual Deck");
+    sf::RenderWindow window(sf::VideoMode(WIDTH, HEIGHT), "ChaosEngine - Neon Lab");
     window.setFramerateLimit(FPS);
 
-    if (!ImGui::SFML::Init(window)) {
-        std::cerr << "Fallo al inicializar ImGui-SFML" << std::endl;
-        return -1;
-    }
+    if (!ImGui::SFML::Init(window)) return -1;
 
     PhysicsWorld physics(WIDTH, HEIGHT);
     physics.isPaused = true; 
+    const auto& bodies = physics.getDynamicBodies();
 
     fs::path videoPath(VIDEO_DIRECTORY);
     fs::path outputDir = videoPath.parent_path();
@@ -44,19 +76,34 @@ int main()
     sf::Clock clock;
     sf::Clock deltaClock;
     float accumulator = 0.0f;
+    float globalTime = 0.0f; // Para animaciones
 
+    // --- COLORES & ESTÉTICA ---
     const char* racerNames[] = { "Cyan", "Magenta", "Green", "Yellow" };
+    
+    // Paleta Neon
+    sf::Color racerColors[] = {
+        sf::Color(0, 255, 255),   // Cyan Eléctrico
+        sf::Color(255, 0, 255),   // Magenta Hot
+        sf::Color(57, 255, 20),   // Verde Lima Neon
+        sf::Color(255, 215, 0)    // Amarillo Sol
+    };
+
     ImVec4 guiColors[] = {
         ImVec4(0, 1, 1, 1),   
         ImVec4(1, 0, 1, 1),   
-        ImVec4(0, 1, 0, 1),   
-        ImVec4(1, 1, 0, 1)    
-    };
-    sf::Color racerColors[] = {
-        sf::Color::Cyan, sf::Color::Magenta, sf::Color::Green, sf::Color::Yellow
+        ImVec4(0.2f, 1, 0.1f, 1),   
+        ImVec4(1, 0.8f, 0, 1)    
     };
 
-    // Buffer para el nombre del archivo de mapa
+    // Fondo pre-renderizado
+    sf::Texture gridTexture = createGridTexture(WIDTH, HEIGHT);
+    sf::Sprite background(gridTexture);
+
+    // Sistema de Trails
+    std::vector<Trail> trails(4);
+    for(int i=0; i<4; ++i) trails[i].color = racerColors[i];
+
     static char mapFilename[128] = "level_01.txt";
 
     while (window.isOpen()) {
@@ -70,12 +117,56 @@ int main()
 
         ImGui::SFML::Update(window, deltaClock.restart());
 
+        // --- UPDATE FÍSICA ---
+        sf::Time dt = clock.restart();
+        float dtSec = dt.asSeconds();
+        
+        // Actualizamos efectos visuales de paredes siempre (para el fade out)
+        physics.updateWallVisuals(dtSec);
+        globalTime += dtSec;
+
+        if (!physics.isPaused) {
+            accumulator += dtSec;
+            while (accumulator >= timeStep) {
+                physics.step(timeStep, velIter, posIter);
+                accumulator -= timeStep;
+            }
+        } else {
+            accumulator = 0.0f;
+        }
+
+        // --- ACTUALIZAR TRAILS ---
+        if (!physics.isPaused) {
+
+            for (size_t i = 0; i < bodies.size(); ++i) {
+                if (i >= trails.size()) break;
+                
+                b2Vec2 pos = bodies[i]->GetPosition();
+                sf::Vector2f p(pos.x * PhysicsWorld::SCALE, pos.y * PhysicsWorld::SCALE);
+                
+                trails[i].points.push_front(p);
+                
+                // Largo dinámico basado en velocidad
+                float speed = bodies[i]->GetLinearVelocity().Length();
+                size_t maxPoints = (size_t)(speed * 3.0f) + 10; // Base + Velocidad
+                
+                if (trails[i].points.size() > maxPoints) {
+                    trails[i].points.pop_back();
+                }
+            }
+        }
+
+        if (physics.gameOver) {
+            std::cout << ">>> WINNER: " << physics.winnerIndex << std::endl;
+            window.close();
+        }
+
         // ============================================================
         //                VENTANA 1: DIRECTOR DECK
         // ============================================================
         
         ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(350, 700), ImGuiCond_FirstUseEver); // Un poco más alta
+        ImGui::SetNextWindowSize(ImVec2(350, 700), ImGuiCond_FirstUseEver);
         
         ImGui::Begin("Director Control", nullptr);
 
@@ -100,7 +191,10 @@ int main()
         } else {
             if (ImGui::Button("PAUSE PHYS", ImVec2(-1, 30))) physics.isPaused = true;
         }
-        if (ImGui::Button("RESET RACE", ImVec2(-1, 20))) physics.resetRacers();
+        if (ImGui::Button("RESET RACE", ImVec2(-1, 20))) {
+            physics.resetRacers();
+            for(auto& t : trails) t.points.clear(); // Limpiar estelas
+        }
 
         ImGui::Separator();
 
@@ -108,12 +202,11 @@ int main()
         ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, 1), "MAP SYSTEM");
         ImGui::InputText("Filename", mapFilename, IM_ARRAYSIZE(mapFilename));
         
-        if (ImGui::Button("SAVE MAP", ImVec2(100, 30))) {
-            physics.saveMap(mapFilename);
-        }
+        if (ImGui::Button("SAVE MAP", ImVec2(100, 30))) physics.saveMap(mapFilename);
         ImGui::SameLine();
         if (ImGui::Button("LOAD MAP", ImVec2(100, 30))) {
             physics.loadMap(mapFilename);
+            for(auto& t : trails) t.points.clear();
         }
 
         ImGui::Separator();
@@ -128,14 +221,15 @@ int main()
         ImGui::Spacing();
         ImGui::Text("Custom Walls List:");
         
-        const auto& walls = physics.getCustomWalls();
+        const auto& walls = physics.getCustomWalls(); // Sin const para editar visuales si quisiera
         int wallToDelete = -1;
 
         for (int i = 0; i < walls.size(); ++i) {
             ImGui::PushID(i);
             std::string label = "Wall " + std::to_string(i);
             if (ImGui::CollapsingHeader(label.c_str())) {
-                CustomWall w = walls[i];
+                // Leer valores actuales
+                CustomWall w = walls[i]; // Copia
                 float pos[2] = { w.body->GetPosition().x, w.body->GetPosition().y };
                 float size[2] = { w.width, w.height };
                 bool changed = false;
@@ -213,7 +307,7 @@ int main()
 
         ImGui::Text("INDIVIDUAL CONTROLS");
         
-        const auto& bodies = physics.getDynamicBodies();
+
         
         for (size_t i = 0; i < bodies.size(); ++i) {
             b2Body* b = bodies[i];
@@ -261,27 +355,11 @@ int main()
         ImGui::End(); 
 
 
-        // --- UPDATE FÍSICA ---
-        sf::Time dt = clock.restart();
-        if (!physics.isPaused) {
-            accumulator += dt.asSeconds();
-            while (accumulator >= timeStep) {
-                physics.step(timeStep, velIter, posIter);
-                accumulator -= timeStep;
-            }
-        } else {
-            accumulator = 0.0f;
-        }
-
-        if (physics.gameOver) {
-            std::cout << ">>> WINNER: " << physics.winnerIndex << std::endl;
-            window.close();
-        }
-
         // --- RENDER ---
-        window.clear(sf::Color(18, 18, 18)); 
+        window.clear(); 
+        window.draw(background); // 1. Fondo Grid
 
-        // 1. DIBUJAR PAREDES CUSTOM
+        // 2. DIBUJAR PAREDES CUSTOM (Con Flash)
         const auto& customWalls = physics.getCustomWalls();
         for (const auto& wall : customWalls) {
             b2Vec2 pos = wall.body->GetPosition();
@@ -293,30 +371,81 @@ int main()
             r.setOrigin(wPx / 2.0f, hPx / 2.0f);
             r.setPosition(pos.x * PhysicsWorld::SCALE, pos.y * PhysicsWorld::SCALE);
             
-            r.setFillColor(sf::Color(200, 200, 200)); 
-            r.setOutlineColor(sf::Color::White);
-            r.setOutlineThickness(1.0f);
+            // Lógica de color reactiva
+            // Base: Gris Acero (#404040) -> Flash: Blanco
+            sf::Color baseColor(64, 64, 64);
+            sf::Color flashColor(255, 255, 255);
+            
+            // Interpolación manual (lerp)
+            float t = wall.flashTimer; // 0 a 1
+            sf::Color drawColor;
+            drawColor.r = (sf::Uint8)(baseColor.r + (flashColor.r - baseColor.r) * t);
+            drawColor.g = (sf::Uint8)(baseColor.g + (flashColor.g - baseColor.g) * t);
+            drawColor.b = (sf::Uint8)(baseColor.b + (flashColor.b - baseColor.b) * t);
+            
+            r.setFillColor(drawColor); 
+            r.setOutlineColor(sf::Color(200, 200, 200)); // Borde claro fijo
+            r.setOutlineThickness(2.0f);
             
             window.draw(r);
         }
 
-        // 2. Win Zone
+        // 3. Win Zone (Pulsing)
         b2Body* zone = physics.getWinZoneBody();
         if (zone) {
             b2Vec2 pos = zone->GetPosition();
             sf::RectangleShape zoneRect;
             float w = physics.winZoneSize[0] * PhysicsWorld::SCALE;
             float h = physics.winZoneSize[1] * PhysicsWorld::SCALE;
+            
+            // Efecto respiración
+            float pulse = (std::sin(globalTime * 3.0f) + 1.0f) * 0.5f; // 0 a 1
+            float alpha = 50.0f + pulse * 100.0f; // 50 a 150
+            
             zoneRect.setSize(sf::Vector2f(w, h));
             zoneRect.setOrigin(w/2.0f, h/2.0f);
             zoneRect.setPosition(pos.x * PhysicsWorld::SCALE, pos.y * PhysicsWorld::SCALE);
-            zoneRect.setFillColor(sf::Color(255, 215, 0, 80)); 
+            zoneRect.setFillColor(sf::Color(255, 215, 0, (sf::Uint8)alpha)); 
             zoneRect.setOutlineColor(sf::Color::Yellow);
-            zoneRect.setOutlineThickness(2.0f);
+            zoneRect.setOutlineThickness(3.0f);
             window.draw(zoneRect);
         }
 
-        // 3. Racers
+        // 4. Racers & Trails
+        
+        
+        // A) Dibujar Trails primero (detrás)
+        for (size_t i = 0; i < trails.size(); ++i) {
+            const auto& pts = trails[i].points;
+            if (pts.empty()) continue;
+
+            sf::VertexArray va(sf::TriangleStrip, pts.size() * 2);
+            float width = 8.0f; // Grosor de la cinta
+
+            for (size_t j = 0; j < pts.size(); ++j) {
+                // Cálculo de normal para grosor (simplificado, asume vertical si falla)
+                sf::Vector2f normal(1, 0);
+                if (j + 1 < pts.size()) {
+                    sf::Vector2f dir = pts[j+1] - pts[j];
+                    float len = std::sqrt(dir.x*dir.x + dir.y*dir.y);
+                    if(len > 0.001f) normal = sf::Vector2f(-dir.y/len, dir.x/len);
+                }
+
+                // Fade out alpha basado en índice
+                float alphaPct = 1.0f - (float)j / (float)pts.size();
+                sf::Color c = trails[i].color;
+                c.a = (sf::Uint8)(alphaPct * 150.0f); // Max alpha 150
+
+                va[j*2].position = pts[j] + normal * (width * alphaPct * 0.5f);
+                va[j*2].color = c;
+                
+                va[j*2+1].position = pts[j] - normal * (width * alphaPct * 0.5f);
+                va[j*2+1].color = c;
+            }
+            window.draw(va);
+        }
+
+        // B) Dibujar Racers (Núcleo brillante)
         for (size_t i = 0; i < bodies.size(); ++i) {
             b2Body* body = bodies[i];
             b2Vec2 pos = body->GetPosition();
@@ -329,8 +458,13 @@ int main()
             rect.setPosition(pos.x * PhysicsWorld::SCALE, pos.y * PhysicsWorld::SCALE);
             rect.setRotation(angle * 180.0f / 3.14159f);
 
-            if (i < 4) rect.setFillColor(racerColors[i]);
-            else rect.setFillColor(sf::Color::White);
+            // Borde Color Equipo
+            if (i < 4) rect.setOutlineColor(racerColors[i]);
+            else rect.setOutlineColor(sf::Color::White);
+            
+            // Centro Blanco Brillante
+            rect.setFillColor(sf::Color::White);
+            rect.setOutlineThickness(-3.0f); // Borde interno
 
             window.draw(rect);
         }

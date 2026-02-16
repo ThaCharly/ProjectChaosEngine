@@ -1,8 +1,8 @@
 #include "PhysicsWorld.hpp"
 #include <cmath>
 #include <iostream>
-#include <fstream> // Para archivos
-#include <sstream> // Para parsear texto
+#include <fstream> 
+#include <sstream> 
 
 PhysicsWorld::PhysicsWorld(float widthPixels, float heightPixels)
     : world(b2Vec2(0.0f, 0.0f)) 
@@ -30,6 +30,7 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
     world.SetGravity(enableGravity ? b2Vec2(0.0f, 9.8f) : b2Vec2(0.0f, 0.0f));
     
     contactListener.bodiesToCheck.clear();
+    contactListener.wallsHit.clear(); // Limpiamos choques viejos
     contactListener.winnerBody = nullptr;
 
     world.Step(timeStep, velIter, posIter);
@@ -77,9 +78,28 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
     }
 }
 
-// --- SISTEMA DE GUARDADO Y CARGA ---
+// --- ACTUALIZACIÓN VISUAL (Flashes) ---
+void PhysicsWorld::updateWallVisuals(float dt) {
+    // 1. Procesar nuevos impactos
+    for (b2Body* body : contactListener.wallsHit) {
+        // Buscar qué pared es (lineal es rápido para <100 paredes)
+        for (auto& wall : customWalls) {
+            if (wall.body == body) {
+                wall.flashTimer = 1.0f; // Flash al máximo
+            }
+        }
+    }
 
-// --- SISTEMA DE GUARDADO Y CARGA (ACTUALIZADO) ---
+    // 2. Decaer timers
+    for (auto& wall : customWalls) {
+        if (wall.flashTimer > 0.0f) {
+            wall.flashTimer -= dt * 3.0f; // Velocidad del fade out
+            if (wall.flashTimer < 0.0f) wall.flashTimer = 0.0f;
+        }
+    }
+}
+
+// --- SISTEMA DE GUARDADO Y CARGA ---
 
 void PhysicsWorld::saveMap(const std::string& filename) {
     std::ofstream file(filename);
@@ -88,23 +108,18 @@ void PhysicsWorld::saveMap(const std::string& filename) {
         return;
     }
 
-    // 1. Guardar Configuración Global (Opcional, pero útil)
     file << "CONFIG " << targetSpeed << " " << currentRacerSize << " " 
          << currentRestitution << " " << enableChaos << "\n";
 
-    // 2. Guardar Win Zone
     file << "WINZONE " << winZonePos[0] << " " << winZonePos[1] << " " 
          << winZoneSize[0] << " " << winZoneSize[1] << "\n";
 
-    // 3. Guardar Custom Walls
     for (const auto& wall : customWalls) {
         b2Vec2 pos = wall.body->GetPosition();
         file << "WALL " << pos.x << " " << pos.y << " " 
              << wall.width << " " << wall.height << "\n";
     }
 
-    // 4. GUARDAR RACERS (Posición, Velocidad y Ángulo)
-    // Esto permite retomar la simulación exactamente donde quedó.
     for (size_t i = 0; i < dynamicBodies.size(); ++i) {
         b2Body* b = dynamicBodies[i];
         b2Vec2 pos = b->GetPosition();
@@ -118,7 +133,7 @@ void PhysicsWorld::saveMap(const std::string& filename) {
              << angle << " " << angVel << "\n";
     }
 
-    std::cout << "Mapa y estado guardados en " << filename << std::endl;
+    std::cout << "Mapa guardado: " << filename << std::endl;
     file.close();
 }
 
@@ -129,12 +144,7 @@ void PhysicsWorld::loadMap(const std::string& filename) {
         return;
     }
 
-    // 1. Limpieza total
     clearCustomWalls();
-    
-    // 2. Reseteamos los racers a default primero.
-    // Si el archivo tiene datos de RACER, los sobreescribirá abajo.
-    // Si no tiene (mapa viejo), quedan en la grilla default.
     resetRacers(); 
 
     std::string line;
@@ -144,13 +154,11 @@ void PhysicsWorld::loadMap(const std::string& filename) {
         ss >> type;
 
         if (type == "CONFIG") {
-            // Recuperamos configuraciones físicas básicas
             float spd, size, rest;
             bool chaos;
             ss >> spd >> size >> rest >> chaos;
             targetSpeed = spd;
             enableChaos = chaos;
-            // Actualizamos física
             updateRacerSize(size); 
             updateRestitution(rest);
         }
@@ -165,14 +173,12 @@ void PhysicsWorld::loadMap(const std::string& filename) {
             addCustomWall(x, y, w, h);
         }
         else if (type == "RACER") {
-            // LEER ESTADO DEL RACER
             int id;
             float x, y, vx, vy, angle, angVel;
             ss >> id >> x >> y >> vx >> vy >> angle >> angVel;
 
             if (id >= 0 && id < dynamicBodies.size()) {
                 b2Body* b = dynamicBodies[id];
-                // Teletransportamos el cuerpo a lo guardado
                 b->SetTransform(b2Vec2(x, y), angle);
                 b->SetLinearVelocity(b2Vec2(vx, vy));
                 b->SetAngularVelocity(angVel);
@@ -181,9 +187,8 @@ void PhysicsWorld::loadMap(const std::string& filename) {
         }
     }
 
-    // Mantenemos la pausa para que veas lo que cargaste antes de que explote todo
     isPaused = true;
-    std::cout << "Mapa cargado desde " << filename << std::endl;
+    std::cout << "Mapa cargado: " << filename << std::endl;
     file.close();
 }
 
@@ -193,8 +198,6 @@ void PhysicsWorld::clearCustomWalls() {
     }
     customWalls.clear();
 }
-
-// -----------------------------------
 
 void PhysicsWorld::addCustomWall(float x, float y, float w, float h) {
     b2BodyDef bd;
@@ -208,7 +211,7 @@ void PhysicsWorld::addCustomWall(float x, float y, float w, float h) {
     fd.friction = 0.0f;
     fd.restitution = 1.0f;
     body->CreateFixture(&fd);
-    customWalls.push_back({body, w, h});
+    customWalls.push_back({body, w, h, 0.0f}); // FlashTimer = 0
 }
 
 void PhysicsWorld::updateCustomWall(int index, float x, float y, float w, float h) {
@@ -235,7 +238,7 @@ void PhysicsWorld::removeCustomWall(int index) {
     customWalls.erase(customWalls.begin() + index);
 }
 
-const std::vector<CustomWall>& PhysicsWorld::getCustomWalls() const {
+std::vector<CustomWall>& PhysicsWorld::getCustomWalls() {
     return customWalls;
 }
 
@@ -244,7 +247,7 @@ b2Body* PhysicsWorld::getWinZoneBody() const { return winZoneBody; }
 void PhysicsWorld::createWinZone() {
     b2BodyDef bodyDef;
     bodyDef.type = b2_staticBody;
-    winZonePos[0] = worldWidthMeters / 1.0f; // Originalmente era / 2.0f, ajusté a tu última versión visible
+    winZonePos[0] = worldWidthMeters / 1.0f;
     winZonePos[1] = worldHeightMeters * 0.8f;
     bodyDef.position.Set(winZonePos[0], winZonePos[1]);
     winZoneBody = world.CreateBody(&bodyDef);
@@ -326,7 +329,7 @@ void PhysicsWorld::resetRacers() {
     }
     gameOver = false;
     winnerIndex = -1;
-    isPaused = true; // Pausamos al resetear/cargar mapa para que puedas ver el setup
+    isPaused = true;
 }
 
 void PhysicsWorld::createWalls(float widthPixels, float heightPixels) {

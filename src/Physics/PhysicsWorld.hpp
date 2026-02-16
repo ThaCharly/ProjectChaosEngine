@@ -4,18 +4,21 @@
 #include <vector>
 #include <random>
 #include <set>
-#include <string> // Necesario para nombres de archivo
+#include <string>
 
 // Estructura para paredes dinámicas
 struct CustomWall {
     b2Body* body;
     float width;
     float height;
+    // Visuals
+    float flashTimer = 0.0f; // 1.0f = Blanco, 0.0f = Gris
 };
 
 class ChaosContactListener : public b2ContactListener {
 public:
     std::set<b2Body*> bodiesToCheck;
+    std::set<b2Body*> wallsHit; // Paredes golpeadas en este frame
     b2Body* winZoneBody = nullptr;
     b2Body* winnerBody = nullptr;
 
@@ -26,13 +29,29 @@ public:
         b2Body* bodyA = fa->GetBody();
         b2Body* bodyB = fb->GetBody();
 
+        // 1. Detección de Victoria
         if (winZoneBody) {
             if (bodyA == winZoneBody && bodyB->GetType() == b2_dynamicBody) winnerBody = bodyB;
             else if (bodyB == winZoneBody && bodyA->GetType() == b2_dynamicBody) winnerBody = bodyA;
         }
 
-        if (fa->GetBody()->GetType() == b2_dynamicBody) bodiesToCheck.insert(fa->GetBody());
-        if (fb->GetBody()->GetType() == b2_dynamicBody) bodiesToCheck.insert(fb->GetBody());
+        // 2. Glitches (Dinámico vs Dinámico)
+        if (fa->GetBody()->GetType() == b2_dynamicBody && fb->GetBody()->GetType() == b2_dynamicBody) {
+            bodiesToCheck.insert(fa->GetBody());
+            bodiesToCheck.insert(fb->GetBody());
+        }
+
+        // 3. Paredes Reactivas (Dinámico vs Estático)
+        // Si A es dinámico y B estático (pared)
+        if (bodyA->GetType() == b2_dynamicBody && bodyB->GetType() == b2_staticBody) {
+            bodiesToCheck.insert(bodyA); // Glitch potential
+            wallsHit.insert(bodyB);      // Flash visual
+        }
+        // Si B es dinámico y A estático (pared)
+        else if (bodyB->GetType() == b2_dynamicBody && bodyA->GetType() == b2_staticBody) {
+            bodiesToCheck.insert(bodyB); // Glitch potential
+            wallsHit.insert(bodyA);      // Flash visual
+        }
     }
 };
 
@@ -41,6 +60,9 @@ public:
     PhysicsWorld(float widthPixels, float heightPixels);
 
     void step(float timeStep, int velocityIterations, int positionIterations);
+    
+    // Método para actualizar los efectos visuales (Flashes)
+    void updateWallVisuals(float dt);
 
     const std::vector<b2Body*>& getDynamicBodies() const;
     b2Body* getWinZoneBody() const;
@@ -49,13 +71,13 @@ public:
     // --- NUEVO SISTEMA DE MAPAS (SAVE/LOAD) ---
     void saveMap(const std::string& filename);
     void loadMap(const std::string& filename);
-    void clearCustomWalls(); // Borra todas las paredes creadas
+    void clearCustomWalls(); 
     // ------------------------------------------
 
     void addCustomWall(float x, float y, float w, float h);
     void updateCustomWall(int index, float x, float y, float w, float h);
     void removeCustomWall(int index);
-    const std::vector<CustomWall>& getCustomWalls() const;
+    std::vector<CustomWall>& getCustomWalls(); // Sin const para poder modificar flashTimer
 
     static constexpr float SCALE = 30.0f;
 
