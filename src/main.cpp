@@ -83,6 +83,10 @@ int main()
     float accumulator = 0.0f;
     float globalTime = 0.0f;
 
+    float victoryTimer = 0.0f;       // Acumulador de tiempo post-victoria
+    bool victorySequenceStarted = false; // Flag para imprimir una sola vez
+    const float VICTORY_DELAY = 0.5f; // Medio segundo de gracia
+
     const char* racerNames[] = { "Cyan", "Magenta", "Green", "Yellow" };
     
     sf::Color racerColors[] = {
@@ -147,9 +151,25 @@ int main()
             }
         }
 
+// --- LÓGICA DE VICTORIA CON DELAY ---
         if (physics.gameOver) {
-            std::cout << ">>> WINNER: " << physics.winnerIndex << std::endl;
-            window.close();
+            // 1. Iniciar secuencia si es la primera vez
+            if (!victorySequenceStarted) {
+                std::cout << ">>> VICTORY DETECTED: Racer " << physics.winnerIndex << ". Finishing recording..." << std::endl;
+                victorySequenceStarted = true;
+                // Opcional: Podrías frenar el tiempo (physics.isPaused = true) 
+                // pero si querés ver como entra suavemente, dejalo correr.
+            }
+
+            // 2. Acumular tiempo
+            victoryTimer += dtSec;
+
+            // 3. Chequear si pasó el tiempo
+            if (victoryTimer >= VICTORY_DELAY) {
+                std::cout << ">>> CLOSING SIMULATION." << std::endl;
+                recorder.stop(); // <--- FUSIÓN CRÍTICA AQUÍ
+                window.close();
+            }
         }
 
         // --- IMGUI DIRECTOR ---
@@ -181,6 +201,8 @@ int main()
         if (ImGui::Button("RESET RACE", ImVec2(-1, 20))) {
             physics.resetRacers();
             for(auto& t : trails) t.points.clear();
+            victoryTimer = 0.0f; // <--- RESETEAR
+            victorySequenceStarted = false; // <--- RESETEAR
         }
 
         ImGui::Separator();

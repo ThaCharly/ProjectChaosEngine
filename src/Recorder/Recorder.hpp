@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <vector>
 #include <SFML/Graphics.hpp>
-#include <SFML/Audio.hpp> // Necesario para tipos de audio
+#include <SFML/Audio.hpp> 
 
 class Recorder {
 public:
@@ -12,9 +12,10 @@ public:
     ~Recorder();
 
     void addFrame(const sf::Window& window);
-    
-    // MÉTODO NUEVO: Recibe un sonido y lo mezcla en la pista de audio
     void addAudioEvent(const sf::Int16* samples, std::size_t sampleCount, float volume);
+    
+    // MÉTODO NUEVO: Cierra todo, guarda y fusiona.
+    void stop(); 
 
     bool isRecording = false; 
 
@@ -23,14 +24,15 @@ private:
     int width;
     int height;
     int fps;
-    std::string finalFilename;      // Nombre final (video.mp4)
-    std::string tempVideoFilename;  // Video mudo temporal (temp_video.mp4)
-    std::string tempAudioFilename;  // Audio temporal (temp_audio.wav)
+    std::string finalFilename;      
+    std::string tempVideoFilename;  
+    std::string tempAudioFilename;  
 
     sf::Texture captureTexture;
     
-    // MIXER DE AUDIO INTERNO
-    std::vector<float> audioMixBuffer; // Usamos float para evitar saturación al sumar
+    std::vector<float> audioMixBuffer; 
     unsigned int sampleRate = 44100;
-    long long currentFrame = 0; // Para saber en qué milisegundo estamos
+    long long currentFrame = 0; 
+    
+    bool isFinished = false; // Para saber si ya cerramos
 };
