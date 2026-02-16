@@ -109,7 +109,7 @@ int main()
     std::vector<Trail> trails(4);
     for(int i=0; i<4; ++i) trails[i].color = racerColors[i];
 
-    static char mapFilename[128] = "level_01.txt";
+    static char mapFilename[128] = "../levels/level_01.txt";
 
     while (window.isOpen()) {
 
