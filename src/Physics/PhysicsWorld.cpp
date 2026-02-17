@@ -425,6 +425,7 @@ void PhysicsWorld::updateWallExpansion(float dt) {
         if (wall.expansionAxis == 0 || wall.expansionAxis == 2) { newWidth += growth; sizeChanged = true; }
         if (wall.expansionAxis == 1 || wall.expansionAxis == 2) { newHeight += growth; sizeChanged = true; }
 
+        // Si no se supone que crezca, pasamos al siguiente (pero ojo, si ya creció antes, igual mata)
         if (!sizeChanged) continue;
 
         // --- CHECK 1: MAX SIZE ---
@@ -456,50 +457,68 @@ void PhysicsWorld::updateWallExpansion(float dt) {
                 float sumHalfWidths = (newWidth / 2.0f) + (other.width / 2.0f);
                 float sumHalfHeights = (newHeight / 2.0f) + (other.height / 2.0f);
 
-                if (dx < sumHalfWidths - 0.01f && dy < sumHalfHeights - 0.01f) {
+                // Pequeño margen de 0.05 para que frene JUSTO antes de tocar
+                if (dx < sumHalfWidths - 0.05f && dy < sumHalfHeights - 0.05f) {
                     wall.isExpandable = false; 
-                    std::cout << "Wall " << i << " stopped by target Wall " << j << std::endl;
-                    newWidth = wall.width;
+                    // Ajustamos el tamaño para que sea "contacto perfecto"
+                    // (Esto es opcional, pero evita que queden gaps feos)
+                    // Por ahora simplemente frenamos el crecimiento.
+                    newWidth = wall.width; 
                     newHeight = wall.height;
                     sizeChanged = false; 
+                    std::cout << "Wall " << i << " stopped by target Wall " << j << std::endl;
                     break; 
                 }
             }
         }
 
-        // Si la pared paró de crecer, no calculamos muertes ni actualizamos fixtures
-        if (!sizeChanged || (newWidth == wall.width && newHeight == wall.height)) continue;
-
-        // >>> ZONA DE CRUSH: DETECTAR APLASTAMIENTO DE RACERS <<<
+// >>> ZONA DE CRUSH 2.0 (CORREGIDA) <<<
         b2Vec2 wallPos = wall.body->GetPosition();
-        float wallMinX = wallPos.x - newWidth / 2.0f;
-        float wallMaxX = wallPos.x + newWidth / 2.0f;
-        float wallMinY = wallPos.y - newHeight / 2.0f;
-        float wallMaxY = wallPos.y + newHeight / 2.0f;
-
-        float margin = currentRacerSize * 0.1f; 
+        float wallHalfW = (sizeChanged ? newWidth : wall.width) / 2.0f;
+        float wallHalfH = (sizeChanged ? newHeight : wall.height) / 2.0f;
+        
+        float racerRadius = currentRacerSize / 2.0f; 
+        
+        // ACÁ PODÉS JUGAR CON EL PORCENTAJE (0.9 = 90% aplastado para morir)
+        float killPercentage = 0.5f; 
+        float killThresholdArea = (currentRacerSize * currentRacerSize) * killPercentage;
 
         for (size_t r = 0; r < dynamicBodies.size(); ++r) {
             if (!racerStatus[r].isAlive) continue;
 
             b2Body* racerBody = dynamicBodies[r];
+            if (!racerBody->IsEnabled()) continue;
+
             b2Vec2 racerPos = racerBody->GetPosition();
 
-            bool isInsideX = (racerPos.x > wallMinX + margin) && (racerPos.x < wallMaxX - margin);
-            bool isInsideY = (racerPos.y > wallMinY + margin) && (racerPos.y < wallMaxY - margin);
+            float dx = std::abs(racerPos.x - wallPos.x);
+            float dy = std::abs(racerPos.y - wallPos.y);
 
-            if (isInsideX && isInsideY) {
-                std::cout << ">>> RACER " << r << " CRUSHED by Wall " << i << " <<<" << std::endl;
+            float rawOverlapX = (wallHalfW + racerRadius) - dx;
+            float rawOverlapY = (wallHalfH + racerRadius) - dy;
+
+            if (rawOverlapX > 0.05f && rawOverlapY > 0.05f) {
+                // --- EL FIX MATEMÁTICO ---
+                // El overlap no puede ser mayor que el propio racer.
+                // Si la pared es gigante, 'rawOverlap' es gigante. Lo recortamos al tamaño del racer.
+                float realOverlapX = std::min(rawOverlapX, currentRacerSize);
+                float realOverlapY = std::min(rawOverlapY, currentRacerSize);
+
+                float crushedArea = realOverlapX * realOverlapY;
                 
-                // 1. Marcar como muerto
-                racerStatus[r].isAlive = false;
-                racerStatus[r].deathPos = racerPos;
-
-                // 2. DESACTIVAR DEL MUNDO (FIX BUG)
-                racerBody->SetEnabled(false); // <--- CORREGIDO: SetEnabled
+                if (crushedArea > killThresholdArea) {
+                    std::cout << ">>> RACER " << r << " SQUASHED (" << (crushedArea/(currentRacerSize*currentRacerSize))*100 << "%) <<<" << std::endl;
+                    
+                    racerStatus[r].isAlive = false;
+                    racerStatus[r].deathPos = racerPos;
+                    racerBody->SetEnabled(false); 
+                }
             }
         }
         // >>> FIN ZONA DE CRUSH <<<
+
+        // Solo actualizamos Box2D si realmente creció
+        if (!sizeChanged || (newWidth == wall.width && newHeight == wall.height)) continue;
 
         // Actualizar física de la pared
         wall.width = newWidth;
