@@ -276,11 +276,43 @@ for (int i = 0; i < walls.size(); ++i) {
                 changed |= ImGui::DragFloat2("Size", size, 0.1f, 0.5f, 30.0f);
                 changed |= ImGui::SliderInt("Sound ID", &snd, 0, 8);
                 
-                if (changed) physics.updateCustomWall(i, pos[0], pos[1], size[0], size[1], snd);
+                if (changed) physics.updateCustomWall(i, pos[0], pos[1], size[0], size[1], snd, w.shapeType, w.rotation);
 
                 // --- APPEARANCE (NUEVO & CORREGIDO) ---
                 ImGui::Separator();
                 ImGui::Text("Appearance");
+
+                // BOTÓN NUEVO: AGREGAR PINCHO
+if (ImGui::Button("ADD SPIKE (1m)", ImVec2(-1, 30))) {
+    // ID 0, Shape 1 (Triángulo), Rotación 0
+    physics.addCustomWall(12.0f, 12.0f, 1.0f, 1.0f, 0, 1, 0.0f);
+}
+
+int sType = w.shapeType;
+float rotDeg = w.rotation * 180.0f / 3.14159f; // Mostramos en grados
+
+ImGui::Separator();
+ImGui::Text("Geometry");
+bool geoChanged = false;
+
+// Selector de Forma
+if (ImGui::RadioButton("Box", sType == 0)) { sType = 0; geoChanged = true; } ImGui::SameLine();
+if (ImGui::RadioButton("Spike", sType == 1)) { sType = 1; geoChanged = true; w.isDeadly = true; }
+
+// Slider de Rotación (Snapping a 90 grados queda cómodo)
+if (ImGui::SliderFloat("Rotation", &rotDeg, 0.0f, 360.0f, "%.0f deg")) {
+    geoChanged = true;
+}
+// Botones rápidos de rotación
+if (ImGui::Button("0°")) { rotDeg = 0.0f; geoChanged = true; } ImGui::SameLine();
+if (ImGui::Button("90°")) { rotDeg = 90.0f; geoChanged = true; } ImGui::SameLine();
+if (ImGui::Button("180°")) { rotDeg = 180.0f; geoChanged = true; } ImGui::SameLine();
+if (ImGui::Button("270°")) { rotDeg = 270.0f; geoChanged = true; }
+
+if (geoChanged || changed) { // 'changed' es tu bool anterior de pos/size
+    float rotRad = rotDeg * 3.14159f / 180.0f;
+    physics.updateCustomWall(i, pos[0], pos[1], size[0], size[1], snd, sType, rotRad);
+}
 
                 // 1. Conversión de sf::Color (0-255) a ImVec4 (0.0-1.0) para ImGui
                 sf::Color c = w.neonColor;
@@ -410,40 +442,57 @@ if (ImGui::Checkbox("IS DEADLY (Spike)", &w.isDeadly)) {
         window.clear();
         window.draw(background);
 
-const auto& customWalls = physics.getCustomWalls();
+        const auto& customWalls = physics.getCustomWalls();
         for (const auto& wall : customWalls) {
             b2Vec2 pos = wall.body->GetPosition();
             float wPx = wall.width * PhysicsWorld::SCALE;
             float hPx = wall.height * PhysicsWorld::SCALE;
             
-            sf::RectangleShape r;
-            r.setSize(sf::Vector2f(wPx, hPx));
-            r.setOrigin(wPx / 2.0f, hPx / 2.0f);
-            r.setPosition(pos.x * PhysicsWorld::SCALE, pos.y * PhysicsWorld::SCALE);
-            
-            // Calculamos el color actual basado en el Flash Timer
-            // Si flashTimer es 1.0 (golpe reciente), es flashColor. Si es 0.0, es baseFillColor.
+            // --- FIX: ELECCIÓN DE FORMA ---
+            sf::Shape* shapeToDraw = nullptr;
+            sf::RectangleShape rectShape;
+            sf::ConvexShape triShape;
+
+            if (wall.shapeType == 1) {
+                // --- DIBUJAR PINCHO (Triángulo) ---
+                triShape.setPointCount(3);
+                triShape.setPoint(0, sf::Vector2f(0.0f, -hPx / 2.0f));       // Punta
+                triShape.setPoint(1, sf::Vector2f(wPx / 2.0f, hPx / 2.0f));  // Base Der
+                triShape.setPoint(2, sf::Vector2f(-wPx / 2.0f, hPx / 2.0f)); // Base Izq
+                
+                triShape.setPosition(pos.x * PhysicsWorld::SCALE, pos.y * PhysicsWorld::SCALE);
+                // Convertir radianes a grados para SFML
+                triShape.setRotation(wall.body->GetAngle() * 180.0f / 3.14159f);
+                
+                shapeToDraw = &triShape;
+            } else {
+                // --- DIBUJAR PARED (Rectángulo) ---
+                rectShape.setSize(sf::Vector2f(wPx, hPx));
+                rectShape.setOrigin(wPx / 2.0f, hPx / 2.0f);
+                rectShape.setPosition(pos.x * PhysicsWorld::SCALE, pos.y * PhysicsWorld::SCALE);
+                rectShape.setRotation(wall.body->GetAngle() * 180.0f / 3.14159f);
+                
+                shapeToDraw = &rectShape;
+            }
+
+            // --- COLORES ---
             sf::Color currentFill = lerpColor(wall.baseFillColor, wall.flashColor, wall.flashTimer);
-            
-            // El borde también "palpita" un poco con el golpe
             sf::Color currentOutline = lerpColor(wall.neonColor, sf::Color::White, wall.flashTimer * 0.5f);
 
             if (wall.isDeadly) {
-    // Hacemos que titile un poco en rojo oscuro
-    float dangerPulse = (std::sin(globalTime * 10.0f) + 1.0f) * 0.5f; // Rápido
-    currentFill = sf::Color(100 + (dangerPulse * 50), 0, 0, 255); // Rojo pulsante
-    currentOutline = sf::Color::Red;
-}
+                float dangerPulse = (std::sin(globalTime * 10.0f) + 1.0f) * 0.5f; 
+                currentFill = sf::Color(100 + (dangerPulse * 50), 0, 0, 255); 
+                currentOutline = sf::Color::Red;
+            }
 
-            r.setFillColor(currentFill); 
-            r.setOutlineColor(currentOutline);
+            shapeToDraw->setFillColor(currentFill); 
+            shapeToDraw->setOutlineColor(currentOutline);
             
-            // Grosor del borde: Hacemos que se engrose un poquito al golpear
             float thickness = 2.0f + (wall.flashTimer * 2.0f);
-            r.setOutlineThickness(-thickness); // Negativo para que crezca hacia adentro y no cambie el tamaño físico visual
+            shapeToDraw->setOutlineThickness(-thickness);
 
-            window.draw(r);
-        }
+            // --- DIBUJAMOS LA FORMA ELEGIDA ---
+            window.draw(*shapeToDraw);
 
         b2Body* zone = physics.getWinZoneBody();
         if (zone) {
@@ -460,7 +509,7 @@ const auto& customWalls = physics.getCustomWalls();
             zoneRect.setOutlineColor(sf::Color::Yellow);
             zoneRect.setOutlineThickness(3.0f);
             window.draw(zoneRect);
-        }
+        }}
 
 // --- RENDERIZADO DE TUMBAS (CEMENTERIO) ---
 const auto& statuses = physics.getRacerStatus();

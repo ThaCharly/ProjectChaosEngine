@@ -70,7 +70,7 @@ public:
     }
 
     // ESTA ES LA NUEVA FUNCIÓN CLAVE
-    void playMidiNote(int noteNumber, float volume = 80.0f) {
+    void playMidiNote(int noteNumber, float volume = 98.0f) {
         if (noteNumber < 0 || noteNumber > 127) return;
         if (midiBuffers.find(noteNumber) == midiBuffers.end()) return;
 

@@ -245,22 +245,26 @@ void PhysicsWorld::saveMap(const std::string& filename) {
 
     for (const auto& w : customWalls) {
         b2Vec2 pos = w.body->GetPosition();
-        // Guardamos TODOS los atributos en una sola línea larga
+        // Guardamos TODO en una sola línea.
+        // El orden es importante para el load.
         file << "WALL " 
              << pos.x << " " << pos.y << " " 
              << w.width << " " << w.height << " " 
              << w.soundID << " "
-             << w.colorIndex << " "      // <--- Color
-             << w.isExpandable << " "    // <--- Expandible
+             << w.colorIndex << " "      
+             << w.isExpandable << " "    
              << w.expansionDelay << " "
              << w.expansionSpeed << " "
              << w.expansionAxis << " "
              << w.stopOnContact << " "
              << w.stopTargetIdx << " "
-             << w.maxSize << "\n";
+             << w.maxSize << " "
+             // --- NUEVOS CAMPOS ---
+             << w.shapeType << " "
+             << w.rotation << " "
+             << w.isDeadly << "\n";
     }
 
-    // ... (Guardado de Racers igual que antes) ...
     for (size_t i = 0; i < dynamicBodies.size(); ++i) {
         b2Body* b = dynamicBodies[i];
         b2Vec2 pos = b->GetPosition();
@@ -273,12 +277,15 @@ void PhysicsWorld::saveMap(const std::string& filename) {
              << angle << " " << angVel << "\n";
     }
     file.close();
+    std::cout << "Map saved: " << filename << std::endl;
 }
 
-// 5. LOAD MAP INTELIGENTE (Compatible con versiones viejas y nuevas)
 void PhysicsWorld::loadMap(const std::string& filename) {
     std::ifstream file(filename);
-    if (!file.is_open()) return;
+    if (!file.is_open()) {
+        std::cerr << "Map not found: " << filename << std::endl;
+        return;
+    }
 
     clearCustomWalls();
     resetRacers(); 
@@ -290,11 +297,11 @@ void PhysicsWorld::loadMap(const std::string& filename) {
         ss >> type;
 
         if (type == "CONFIG") {
-                        float spd, size, rest; bool chaos;
+            float spd, size, rest; bool chaos;
             ss >> spd >> size >> rest >> chaos;
             targetSpeed = spd; enableChaos = chaos;
             updateRacerSize(size); updateRestitution(rest);
-         }
+        }
         else if (type == "WINZONE") {             
             float x, y, w, h;
             ss >> x >> y >> w >> h;
@@ -303,20 +310,18 @@ void PhysicsWorld::loadMap(const std::string& filename) {
         else if (type == "WALL") {
             float x, y, w, h;
             int sid = 0;
-            // Datos básicos
+            // 1. Datos básicos
             ss >> x >> y >> w >> h >> sid;
             
-            addCustomWall(x, y, w, h, sid);
-            
-            // Obtenemos la referencia a la pared recién creada (la última)
+            // Creamos la pared (por defecto rectangular y sin rotación)
+            addCustomWall(x, y, w, h, sid, 0, 0.0f);
             CustomWall& newWall = customWalls.back();
 
-            // Intentamos leer los datos extendidos (si existen)
-            int cIdx;
+            // 2. Color y Expansión
+            int cIdx = 0;
             if (ss >> cIdx) updateWallColor(customWalls.size() - 1, cIdx);
             
-            // Propiedades de Expansión
-            bool isExp;
+            bool isExp = false;
             if (ss >> isExp) {
                 newWall.isExpandable = isExp;
                 ss >> newWall.expansionDelay 
@@ -326,20 +331,43 @@ void PhysicsWorld::loadMap(const std::string& filename) {
                    >> newWall.stopTargetIdx 
                    >> newWall.maxSize;
             }
+
+            // 3. Geometría y Letalidad (NUEVO)
+            int sType = 0;
+            float rot = 0.0f;
+            bool deadly = false;
+
+            // Intentamos leer si existen en el archivo (retro-compatibilidad)
+            if (ss >> sType) {
+                newWall.shapeType = sType;
+                if (ss >> rot) newWall.rotation = rot;
+                if (ss >> deadly) newWall.isDeadly = deadly;
+
+                // IMPORTANTÍSIMO:
+                // Como addCustomWall la creó default, ahora forzamos la actualización
+                // física para que Box2D cree el Triángulo y la rote de verdad.
+                updateCustomWall(customWalls.size() - 1, x, y, w, h, sid, sType, rot);
+                
+                // Restauramos el flag de deadly (updateCustomWall podría resetearlo)
+                customWalls.back().isDeadly = deadly;
+            }
         }
         else if (type == "RACER") { 
-                        int id; float x, y, vx, vy, a, av;
+            int id; float x, y, vx, vy, a, av;
             ss >> id >> x >> y >> vx >> vy >> a >> av;
             if (id >= 0 && id < dynamicBodies.size()) {
                 b2Body* b = dynamicBodies[id];
+                b->SetEnabled(true);
                 b->SetTransform(b2Vec2(x, y), a);
                 b->SetLinearVelocity(b2Vec2(vx, vy));
                 b->SetAngularVelocity(av);
                 b->SetAwake(true);
-         }}
+            }
+        }
     }
     isPaused = true;
     file.close();
+    std::cout << "Map loaded: " << filename << std::endl;
 }
 
 void PhysicsWorld::clearCustomWalls() {
@@ -379,11 +407,34 @@ const std::vector<sf::Color>& PhysicsWorld::getPalette() {
     return palette;
 }
 
-void PhysicsWorld::addCustomWall(float x, float y, float w, float h, int soundID) {
-b2BodyDef bd; bd.type = b2_staticBody; bd.position.Set(x, y);
+void PhysicsWorld::addCustomWall(float x, float y, float w, float h, int soundID, int shapeType, float rotation) {
+    b2BodyDef bd; 
+    bd.type = b2_staticBody; 
+    bd.position.Set(x, y);
+    bd.angle = rotation; // <--- Rotación Física
+    
     b2Body* body = world.CreateBody(&bd);
-    b2PolygonShape box; box.SetAsBox(w / 2.0f, h / 2.0f);
-    b2FixtureDef fd; fd.shape = &box; fd.friction = 0.0f; fd.restitution = 1.0f;
+
+    b2FixtureDef fd;
+    fd.friction = 0.0f;
+    fd.restitution = 1.0f;
+
+    b2PolygonShape shape;
+    
+    if (shapeType == 1) { 
+        // --- TRIÁNGULO (PINCHO) ---
+        b2Vec2 vertices[3];
+        // Triangulo isósceles apuntando hacia "arriba" localmente
+        vertices[0].Set(0.0f, -h / 2.0f);       // Punta Superior
+        vertices[1].Set(w / 2.0f, h / 2.0f);    // Base Derecha
+        vertices[2].Set(-w / 2.0f, h / 2.0f);   // Base Izquierda
+        shape.Set(vertices, 3);
+    } else {
+        // --- CAJA (NORMAL) ---
+        shape.SetAsBox(w / 2.0f, h / 2.0f);
+    }
+
+    fd.shape = &shape;
     body->CreateFixture(&fd);
 
     CustomWall newWall;
@@ -391,18 +442,25 @@ b2BodyDef bd; bd.type = b2_staticBody; bd.position.Set(x, y);
     newWall.width = w;
     newWall.height = h;
     newWall.soundID = soundID;
+    newWall.shapeType = shapeType; 
+    newWall.rotation = rotation;
 
-    // Asignación de Color Inicial
-    // Si soundID > 0, tratamos de machear el color, sino aleatorio o por posición
-    int colorIdx = (soundID > 0) ? (soundID - 1) : ((int)(x + y) % getPalette().size());
-    
-    // Forzamos que esté en rango
+    // Si es pincho, es mortal y rojo por defecto
+    if (shapeType == 1) {
+        newWall.isDeadly = true;
+        if (soundID == 0) newWall.colorIndex = 5; // 5 = Hot Red
+    }
+
+    // Lógica de colores (igual que antes)
+    int colorIdx = (soundID > 0) ? (soundID - 1) : newWall.colorIndex;
+    if (shapeType == 1 && soundID == 0) colorIdx = 5; // Force Red
+
+    // Forzamos rango
     if (colorIdx < 0) colorIdx = 0;
     colorIdx = colorIdx % getPalette().size();
 
-    newWall.colorIndex = colorIdx; // Guardamos el índice
+    newWall.colorIndex = colorIdx;
     
-    // Calculamos los colores derivados
     const auto& pal = getPalette();
     sf::Color neon = pal[colorIdx];
     newWall.baseFillColor = sf::Color(neon.r / 5, neon.g / 5, neon.b / 5, 240);
@@ -438,22 +496,49 @@ void PhysicsWorld::updateWallColor(int index, int newColorIndex) {
     );
 }
 
-void PhysicsWorld::updateCustomWall(int index, float x, float y, float w, float h, int soundID) {
+void PhysicsWorld::updateCustomWall(int index, float x, float y, float w, float h, int soundID, int shapeType, float rotation) {
     if (index < 0 || index >= customWalls.size()) return;
     CustomWall& wall = customWalls[index];
+    
+    bool needRebuild = (wall.width != w || wall.height != h || wall.shapeType != shapeType);
+    
     wall.soundID = soundID;
-    wall.body->SetTransform(b2Vec2(x, y), 0.0f);
-    if (wall.width != w || wall.height != h) {
+    wall.shapeType = shapeType;
+    wall.rotation = rotation;
+    wall.width = w;
+    wall.height = h;
+
+    // Si cambia a pincho, lo hacemos mortal y rojo
+    if (shapeType == 1) {
+        wall.isDeadly = true;
+        updateWallColor(index, 5);
+    } else {
+        // Si vuelve a ser pared, le sacamos lo mortal (opcional, capaz querés pared mortal)
+        // wall.isDeadly = false; 
+    }
+
+    wall.body->SetTransform(b2Vec2(x, y), rotation);
+
+    if (needRebuild) {
         wall.body->DestroyFixture(wall.body->GetFixtureList());
-        b2PolygonShape box;
-        box.SetAsBox(w / 2.0f, h / 2.0f);
+        
         b2FixtureDef fd;
-        fd.shape = &box;
         fd.friction = 0.0f;
         fd.restitution = 1.0f;
+        b2PolygonShape shape;
+
+        if (shapeType == 1) { // Triángulo
+            b2Vec2 vertices[3];
+            vertices[0].Set(0.0f, -h / 2.0f);
+            vertices[1].Set(w / 2.0f, h / 2.0f);
+            vertices[2].Set(-w / 2.0f, h / 2.0f);
+            shape.Set(vertices, 3);
+        } else { // Caja
+            shape.SetAsBox(w / 2.0f, h / 2.0f);
+        }
+
+        fd.shape = &shape;
         wall.body->CreateFixture(&fd);
-        wall.width = w;
-        wall.height = h;
     }
 }
 

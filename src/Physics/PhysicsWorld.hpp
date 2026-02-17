@@ -22,20 +22,25 @@ struct CustomWall {
     int soundID = 0; 
 
     bool isExpandable = false;
-    float expansionDelay = 2.0f;   // Tiempo de gracia antes de empezar
-    float expansionSpeed = 0.5f;   // Metros por segundo
-    int expansionAxis = 2;         // 0 = X (Ancho), 1 = Y (Alto), 2 = Ambos
-    float timeAlive = 0.0f;        // Timer interno
+    float expansionDelay = 2.0f;
+    float expansionSpeed = 0.5f;
+    int expansionAxis = 2;
+    float timeAlive = 0.0f;
 
-    bool stopOnContact = false;    // ¿Frenar si toca otra pared?
+    bool stopOnContact = false;
     int stopTargetIdx = -1;
     float maxSize = 0.0f;
     bool isDeadly = false;
 
-    int colorIndex = 0; // <--- NUEVO: Para saber qué color de la paleta usa
-    sf::Color baseFillColor = sf::Color(20, 20, 25);   // Relleno oscuro
-    sf::Color neonColor = sf::Color::White;            // Borde neón
-    sf::Color flashColor = sf::Color(255, 255, 255);   // Color al golpear
+    // --- NUEVO: GEOMETRÍA ---
+    int shapeType = 0; // 0 = Box, 1 = Spike
+    float rotation = 0.0f; // Radianes
+    // ------------------------
+
+    int colorIndex = 0; 
+    sf::Color baseFillColor = sf::Color(20, 20, 25);
+    sf::Color neonColor = sf::Color::White;
+    sf::Color flashColor = sf::Color(255, 255, 255);
 };
 
 class ChaosContactListener : public b2ContactListener {
@@ -68,14 +73,16 @@ public:
     void loadMap(const std::string& filename);
     void clearCustomWalls(); 
 
-    void addCustomWall(float x, float y, float w, float h, int soundID = 0);
-    void updateCustomWall(int index, float x, float y, float w, float h, int soundID);
+    // --- ACTUALIZADO: Aceptan shapeType y rotation ---
+    void addCustomWall(float x, float y, float w, float h, int soundID = 0, int shapeType = 0, float rotation = 0.0f);
+    void updateCustomWall(int index, float x, float y, float w, float h, int soundID, int shapeType, float rotation);
+    // --------------------------------------------------
     
     void removeCustomWall(int index);
     std::vector<CustomWall>& getCustomWalls(); 
 
-    static const std::vector<sf::Color>& getPalette(); // Exponer la paleta estática
-    void updateWallColor(int wallIndex, int newColorIndex); // Cambiar color en caliente
+    static const std::vector<sf::Color>& getPalette();
+    void updateWallColor(int wallIndex, int newColorIndex);
 
     static constexpr float SCALE = 30.0f;
 
@@ -107,16 +114,13 @@ public:
 
     void updateWallExpansion(float dt);
 
-    // ... dentro de public ...
     void loadSong(const std::string& filename);
     bool isSongLoaded = false;
 
 private:
-// ... dentro de private ...
     std::vector<int> songNotes;
     int currentNoteIndex = 0;
 
-    
     void createWalls(float widthPixels, float heightPixels);
     void createRacers();
     void createWinZone();
