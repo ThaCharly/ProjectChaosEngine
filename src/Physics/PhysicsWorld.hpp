@@ -19,6 +19,10 @@ struct CustomWall {
     float expansionSpeed = 0.5f;   // Metros por segundo
     int expansionAxis = 2;         // 0 = X (Ancho), 1 = Y (Alto), 2 = Ambos
     float timeAlive = 0.0f;        // Timer interno
+
+    bool stopOnContact = false;    // ¿Frenar si toca otra pared?
+    int stopTargetIdx = -1;
+    float maxSize = 0.0f;
 };
 
 class ChaosContactListener : public b2ContactListener {

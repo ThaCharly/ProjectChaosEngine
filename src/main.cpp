@@ -270,17 +270,32 @@ int main()
                 if (w.isExpandable) {
                     ImGui::Indent();
                     // 2. Configuración
-                    ImGui::DragFloat("Start Delay (s)", &w.expansionDelay, 0.1f, 0.0f, 60.0f);
-                    ImGui::DragFloat("Growth Speed (m/s)", &w.expansionSpeed, 0.05f, 0.01f, 5.0f);
+ImGui::DragFloat("Start Delay (s)", &w.expansionDelay, 0.1f, 0.0f, 60.0f);
+                    ImGui::DragFloat("Growth Speed (m/s)", &w.expansionSpeed, 0.05f, 0.01f, 10.0f); // Subí el max a 10 por las dudas
                     
-                    // 3. Ejes (Radio Buttons quedan más claros que un combo)
-                    ImGui::Text("Growth Axis:"); 
+ImGui::Text("Growth Axis:"); 
                     ImGui::SameLine();
                     ImGui::RadioButton("X", &w.expansionAxis, 0); ImGui::SameLine();
                     ImGui::RadioButton("Y", &w.expansionAxis, 1); ImGui::SameLine();
                     ImGui::RadioButton("XY", &w.expansionAxis, 2);
+
+                    ImGui::Separator();
+                    ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "STOP CONDITIONS");
                     
-                    // Monitor del tiempo
+                    // A: FRENAR POR CONTACTO
+                    ImGui::Checkbox("Stop on Contact", &w.stopOnContact);
+                    
+                    if (w.stopOnContact) {
+                        ImGui::Indent();
+                        ImGui::TextDisabled("(?) -1 = Any Wall");
+                        // Input para elegir la pared objetivo
+                        ImGui::InputInt("Target Wall ID", &w.stopTargetIdx);
+                        ImGui::Unindent();
+                    }
+
+                    // B: FRENAR POR TAMAÑO
+                    ImGui::DragFloat("Max Size Limit", &w.maxSize, 0.5f, 0.0f, 100.0f);
+
                     ImGui::ProgressBar(w.timeAlive / (w.expansionDelay + 0.001f), ImVec2(-1, 10), "Timer");
                     ImGui::Unindent();
                 }

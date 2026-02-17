@@ -273,47 +273,80 @@ void PhysicsWorld::removeCustomWall(int index) {
 }
 
 void PhysicsWorld::updateWallExpansion(float dt) {
-    if (isPaused) return; // Si está pausado, que no crezcan, o sí... vos ves. Yo lo pauso.
+    if (isPaused) return;
 
-    for (auto& wall : customWalls) {
+    for (size_t i = 0; i < customWalls.size(); ++i) {
+        CustomWall& wall = customWalls[i];
+
         if (!wall.isExpandable) continue;
 
         wall.timeAlive += dt;
-
-        // Si todavía no pasó el tiempo de gracia (Delay), no hacemos nada
         if (wall.timeAlive < wall.expansionDelay) continue;
 
         float growth = wall.expansionSpeed * dt;
+        float newWidth = wall.width;
+        float newHeight = wall.height;
         bool sizeChanged = false;
 
-        // Eje X o Ambos
-        if (wall.expansionAxis == 0 || wall.expansionAxis == 2) {
-            wall.width += growth;
-            sizeChanged = true;
-        }
-        // Eje Y o Ambos
-        if (wall.expansionAxis == 1 || wall.expansionAxis == 2) {
-            wall.height += growth;
-            sizeChanged = true;
+        if (wall.expansionAxis == 0 || wall.expansionAxis == 2) { newWidth += growth; sizeChanged = true; }
+        if (wall.expansionAxis == 1 || wall.expansionAxis == 2) { newHeight += growth; sizeChanged = true; }
+
+        if (!sizeChanged) continue;
+
+        // --- CHECK 1: MAX SIZE ---
+        if (wall.maxSize > 0.0f) {
+            float checkDim = (wall.expansionAxis == 0) ? newWidth : newHeight;
+            if (wall.expansionAxis == 2) checkDim = std::max(newWidth, newHeight);
+
+            if (checkDim >= wall.maxSize) {
+                wall.isExpandable = false;
+                if (wall.expansionAxis == 0 || wall.expansionAxis == 2) newWidth = wall.maxSize;
+                if (wall.expansionAxis == 1 || wall.expansionAxis == 2) newHeight = wall.maxSize;
+            }
         }
 
-        if (sizeChanged) {
-            // ALERTA TÉCNICA: Box2D no deja redimensionar. 
-            // Hay que tirar la pared vieja (el fixture) y levantar una nueva.
+        // --- CHECK 2: STOP ON SPECIFIC CONTACT ---
+        if (wall.stopOnContact) {
+            b2Vec2 myPos = wall.body->GetPosition();
             
-            // 1. Borramos el fixture actual
-            wall.body->DestroyFixture(wall.body->GetFixtureList());
+            for (size_t j = 0; j < customWalls.size(); ++j) {
+                if (i == j) continue; 
 
-            // 2. Creamos la forma nueva con el nuevo width/height
+                // >>> FILTRO DE FRANCOTIRADOR <<<
+                // Si el usuario puso un ID específico (ej: 4) y esta pared es la 2, la ignoramos.
+                if (wall.stopTargetIdx != -1 && (int)j != wall.stopTargetIdx) continue;
+
+                const CustomWall& other = customWalls[j];
+                b2Vec2 otherPos = other.body->GetPosition();
+
+                float dx = std::abs(myPos.x - otherPos.x);
+                float dy = std::abs(myPos.y - otherPos.y);
+
+                float sumHalfWidths = (newWidth / 2.0f) + (other.width / 2.0f);
+                float sumHalfHeights = (newHeight / 2.0f) + (other.height / 2.0f);
+
+                // Colisión detectada
+                if (dx < sumHalfWidths - 0.01f && dy < sumHalfHeights - 0.01f) {
+                    wall.isExpandable = false; 
+                    std::cout << "Wall " << i << " stopped by target Wall " << j << std::endl;
+                    
+                    // Revertimos para no atravesar
+                    newWidth = wall.width;
+                    newHeight = wall.height;
+                    sizeChanged = false; 
+                    break; 
+                }
+            }
+        }
+
+        // Aplicar cambios si sobrevivió a los checks
+        if (sizeChanged && (newWidth != wall.width || newHeight != wall.height)) {
+            wall.width = newWidth;
+            wall.height = newHeight;
+            wall.body->DestroyFixture(wall.body->GetFixtureList());
             b2PolygonShape box;
             box.SetAsBox(wall.width / 2.0f, wall.height / 2.0f);
-
-            b2FixtureDef fd;
-            fd.shape = &box;
-            fd.friction = 0.0f;      // Mantenemos tu config de hielo
-            fd.restitution = 1.0f;   // Rebote puro
-            
-            // 3. Pegamos el fixture al body existente
+            b2FixtureDef fd; fd.shape = &box; fd.friction = 0.0f; fd.restitution = 1.0f;
             wall.body->CreateFixture(&fd);
         }
     }
