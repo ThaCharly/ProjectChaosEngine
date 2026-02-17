@@ -232,6 +232,18 @@ void PhysicsWorld::clearCustomWalls() {
     customWalls.clear();
 }
 
+sf::Color getNeonColor(int index) {
+    static const std::vector<sf::Color> palette = {
+        sf::Color(0, 255, 255),    // Cyan
+        sf::Color(255, 0, 255),    // Magenta
+        sf::Color(57, 255, 20),    // Toxic Lime
+        sf::Color(255, 165, 0),    // Electric Orange
+        sf::Color(147, 0, 255),    // Plasma Purple
+        sf::Color(255, 0, 60)      // Hot Red
+    };
+    return palette[index % palette.size()];
+}
+
 void PhysicsWorld::addCustomWall(float x, float y, float w, float h, int soundID) {
     b2BodyDef bd;
     bd.type = b2_staticBody;
@@ -244,7 +256,35 @@ void PhysicsWorld::addCustomWall(float x, float y, float w, float h, int soundID
     fd.friction = 0.0f;
     fd.restitution = 1.0f;
     body->CreateFixture(&fd);
-    customWalls.push_back({body, w, h, 0.0f, soundID}); 
+    
+    // --- LÓGICA DE COLOR ---
+    // Elegimos un color basado en el ID del sonido o aleatorio para variar
+    // Si soundID es 0, usamos uno random basado en la posición para que sea determinístico
+    int colorIdx = (soundID > 0) ? (soundID - 1) : ((int)(x + y) % 6);
+    sf::Color neon = getNeonColor(colorIdx);
+    
+    // Color de relleno: Una versión muy oscura del neón
+    sf::Color fill = sf::Color(neon.r / 5, neon.g / 5, neon.b / 5, 240);
+    
+    // Color de flash: El neón pero mezclado con blanco (más brillante)
+    sf::Color flash = sf::Color(
+        std::min(255, neon.r + 100),
+        std::min(255, neon.g + 100),
+        std::min(255, neon.b + 100)
+    );
+
+    CustomWall newWall;
+    newWall.body = body;
+    newWall.width = w;
+    newWall.height = h;
+    newWall.soundID = soundID;
+    
+    // Asignamos la paleta
+    newWall.baseFillColor = fill;
+    newWall.neonColor = neon;
+    newWall.flashColor = flash;
+
+    customWalls.push_back(newWall); 
 }
 
 void PhysicsWorld::updateCustomWall(int index, float x, float y, float w, float h, int soundID) {
@@ -415,25 +455,21 @@ void PhysicsWorld::resetRacers() {
     isPaused = true; 
 }
 
-    void PhysicsWorld::createWalls(float widthPixels, float heightPixels) {
+void PhysicsWorld::createWalls(float widthPixels, float heightPixels) {
     float width = worldWidthMeters;
     float height = worldHeightMeters;
     float thick = 0.5f;
 
-    // Usamos addCustomWall para que sean "Paredes con ID"
-    // ID 1: Do (Piso)
-    // ID 2: Re (Techo)
-    // ID 3: Mi (Izq)
-    // ID 4: Fa (Der)
+    // AHORA LAS PAREDES DEL BORDE TIENEN SONIDO Y COLOR
+    // ID 1: Cyan (Piso)
+    // ID 2: Magenta (Techo)
+    // ID 3: Lime (Izq)
+    // ID 4: Orange (Der)
     
-    // Abajo
-    addCustomWall(width / 2.0f, height, width / 2.0f, thick, 1);
-    // Arriba
-    addCustomWall(width / 2.0f, 0.0f, width / 2.0f, thick, 2);
-    // Izquierda
-    addCustomWall(0.0f, height / 2.0f, thick, height / 2.0f, 3);
-    // Derecha
-    addCustomWall(width, height / 2.0f, thick, height / 2.0f, 4);
+    addCustomWall(width / 2.0f, height, width / 2.0f, thick, 1); // Piso
+    addCustomWall(width / 2.0f, 0.0f, width / 2.0f, thick, 2);   // Techo
+    addCustomWall(0.0f, height / 2.0f, thick, height / 2.0f, 3); // Izq
+    addCustomWall(width, height / 2.0f, thick, height / 2.0f, 4);// Der
 }
 void PhysicsWorld::createRacers() { 
     float s = currentRacerSize; 

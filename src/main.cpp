@@ -38,6 +38,17 @@ sf::Texture createGridTexture(int width, int height) {
     return rt.getTexture();
 }
 
+sf::Color lerpColor(const sf::Color& a, const sf::Color& b, float t) {
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+    return sf::Color(
+        (sf::Uint8)(a.r + (b.r - a.r) * t),
+        (sf::Uint8)(a.g + (b.g - a.g) * t),
+        (sf::Uint8)(a.b + (b.b - a.b) * t),
+        (sf::Uint8)(a.a + (b.a - a.a) * t)
+    );
+}
+
 void SoundManager::sendToRecorder(const sf::Int16* samples, std::size_t count, float vol) {
     if (recorder) {
         recorder->addAudioEvent(samples, count, vol);
@@ -361,27 +372,31 @@ ImGui::Text("Growth Axis:");
         window.clear();
         window.draw(background);
 
-        const auto& customWalls = physics.getCustomWalls();
+const auto& customWalls = physics.getCustomWalls();
         for (const auto& wall : customWalls) {
             b2Vec2 pos = wall.body->GetPosition();
-            sf::RectangleShape r;
             float wPx = wall.width * PhysicsWorld::SCALE;
             float hPx = wall.height * PhysicsWorld::SCALE;
+            
+            sf::RectangleShape r;
             r.setSize(sf::Vector2f(wPx, hPx));
             r.setOrigin(wPx / 2.0f, hPx / 2.0f);
             r.setPosition(pos.x * PhysicsWorld::SCALE, pos.y * PhysicsWorld::SCALE);
             
-            sf::Color baseColor(64, 64, 64);
-            sf::Color flashColor(255, 255, 255);
-            float t = wall.flashTimer; 
-            sf::Color drawColor;
-            drawColor.r = (sf::Uint8)(baseColor.r + (flashColor.r - baseColor.r) * t);
-            drawColor.g = (sf::Uint8)(baseColor.g + (flashColor.g - baseColor.g) * t);
-            drawColor.b = (sf::Uint8)(baseColor.b + (flashColor.b - baseColor.b) * t);
+            // Calculamos el color actual basado en el Flash Timer
+            // Si flashTimer es 1.0 (golpe reciente), es flashColor. Si es 0.0, es baseFillColor.
+            sf::Color currentFill = lerpColor(wall.baseFillColor, wall.flashColor, wall.flashTimer);
             
-            r.setFillColor(drawColor); 
-            r.setOutlineColor(sf::Color(200, 200, 200));
-            r.setOutlineThickness(2.0f);
+            // El borde también "palpita" un poco con el golpe
+            sf::Color currentOutline = lerpColor(wall.neonColor, sf::Color::White, wall.flashTimer * 0.5f);
+
+            r.setFillColor(currentFill); 
+            r.setOutlineColor(currentOutline);
+            
+            // Grosor del borde: Hacemos que se engrose un poquito al golpear
+            float thickness = 2.0f + (wall.flashTimer * 2.0f);
+            r.setOutlineThickness(-thickness); // Negativo para que crezca hacia adentro y no cambie el tamaño físico visual
+
             window.draw(r);
         }
 

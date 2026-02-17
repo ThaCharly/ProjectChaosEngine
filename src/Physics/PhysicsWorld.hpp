@@ -1,6 +1,8 @@
 #pragma once
 
 #include <box2d/box2d.h>
+#include <SFML/Graphics.hpp>
+#include <SFML/Window.hpp>
 #include <vector>
 #include <random>
 #include <set>
@@ -28,6 +30,10 @@ struct CustomWall {
     bool stopOnContact = false;    // ¿Frenar si toca otra pared?
     int stopTargetIdx = -1;
     float maxSize = 0.0f;
+
+    sf::Color baseFillColor = sf::Color(20, 20, 25);   // Relleno oscuro
+    sf::Color neonColor = sf::Color::White;            // Borde neón
+    sf::Color flashColor = sf::Color(255, 255, 255);   // Color al golpear
 };
 
 class ChaosContactListener : public b2ContactListener {
