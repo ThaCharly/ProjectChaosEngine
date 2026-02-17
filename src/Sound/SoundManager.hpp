@@ -36,29 +36,41 @@ public:
 
     void generateTone(int id, float frequency) {
         const unsigned SAMPLE_RATE = 44100;
-        
-        // AJUSTE CRÍTICO: Bajamos la amplitud base. 
-        // 20000 deja margen para que suenen ~3 notas juntas sin saturar antes del normalizador.
-        const int AMPLITUDE = 20000; 
+        // Bajamos un poco más la amplitud para evitar saturación interna
+        const int AMPLITUDE = 18000; 
 
         std::vector<sf::Int16> rawSamples;
-        float duration = 0.3f; 
+        float duration = 0.4f; // Duración total
         int numSamples = (int)(SAMPLE_RATE * duration);
 
-        float attackTime = 0.005f; // 5ms de ataque suave
+        // Suavizado inicial (Attack) más largo para evitar el "golpe"
+        float attackTime = 0.02f; // 20ms
 
         for (int i = 0; i < numSamples; i++) {
             float t = (float)i / SAMPLE_RATE;
             
-            // --- ONDA PURA (8-BIT STYLE) ---
+            // ONDA SENOIDAL PURA (8-bit style limpio)
             float wave = std::sin(2 * 3.14159f * frequency * t);
             
-            // ENVELOPE (ADSR Simplificado)
+            // --- ENVELOPE MEJORADO ---
             float envelope = 0.0f;
+
             if (t < attackTime) {
-                envelope = t / attackTime; // Fade In
+                // FADE IN (Attack): Subida lineal suave
+                envelope = t / attackTime;
             } else {
-                envelope = std::exp(-10.0f * (t - attackTime)); // Fade Out
+                // FADE OUT (Decay): Caída exponencial más agresiva para que no quede "cola"
+                envelope = std::exp(-8.0f * (t - attackTime)); 
+            }
+
+            // --- SAFETY RELEASE (CRÍTICO) ---
+            // Forzamos que el sonido muera a CERO en los últimos 50ms.
+            // Esto elimina el "Pop" o "Crack" final si la exponencial no llegó a 0.
+            float fadeOutStart = duration - 0.05f;
+            if (t > fadeOutStart) {
+                float fade = 1.0f - ((t - fadeOutStart) / 0.05f);
+                if (fade < 0.0f) fade = 0.0f;
+                envelope *= fade;
             }
 
             rawSamples.push_back((sf::Int16)(wave * envelope * AMPLITUDE));
@@ -73,16 +85,13 @@ public:
     void playSound(int id, float xPosition, float worldWidth) {
         if (id <= 0 || soundBuffers.find(id) == soundBuffers.end()) return;
 
-        // 1. REPRODUCIR EN VIVO (SFML)
+        // 1. REPRODUCIR EN VIVO
         sf::Sound* sound = getFreeSound();
         if (sound) {
             sound->setBuffer(soundBuffers[id]);
-            sound->setVolume(80.0f); // Volumen alto y claro
+            sound->setVolume(80.0f); 
+            sound->setPitch(1.0f); // Tono puro
             
-            // --- AFINACIÓN PERFECTA ---
-            sound->setPitch(1.0f); // Sin detune
-            
-            // Paneo Estéreo (Mantenemos la espacialidad)
             float normalizedX = (xPosition / worldWidth) * 2.0f - 1.0f; 
             sound->setPosition(normalizedX * 10.0f, 0.0f, 0.0f); 
             sound->setMinDistance(5.0f);
@@ -94,7 +103,6 @@ public:
         // 2. ENVIAR A LA GRABADORA
         if (recorder) {
              const sf::SoundBuffer& buf = soundBuffers[id];
-             // Enviamos al recorder. El normalizador del recorder se encargará si satura.
              sendToRecorder(buf.getSamples(), buf.getSampleCount(), 80.0f);
         }
     }

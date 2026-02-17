@@ -272,6 +272,53 @@ void PhysicsWorld::removeCustomWall(int index) {
     customWalls.erase(customWalls.begin() + index);
 }
 
+void PhysicsWorld::updateWallExpansion(float dt) {
+    if (isPaused) return; // Si está pausado, que no crezcan, o sí... vos ves. Yo lo pauso.
+
+    for (auto& wall : customWalls) {
+        if (!wall.isExpandable) continue;
+
+        wall.timeAlive += dt;
+
+        // Si todavía no pasó el tiempo de gracia (Delay), no hacemos nada
+        if (wall.timeAlive < wall.expansionDelay) continue;
+
+        float growth = wall.expansionSpeed * dt;
+        bool sizeChanged = false;
+
+        // Eje X o Ambos
+        if (wall.expansionAxis == 0 || wall.expansionAxis == 2) {
+            wall.width += growth;
+            sizeChanged = true;
+        }
+        // Eje Y o Ambos
+        if (wall.expansionAxis == 1 || wall.expansionAxis == 2) {
+            wall.height += growth;
+            sizeChanged = true;
+        }
+
+        if (sizeChanged) {
+            // ALERTA TÉCNICA: Box2D no deja redimensionar. 
+            // Hay que tirar la pared vieja (el fixture) y levantar una nueva.
+            
+            // 1. Borramos el fixture actual
+            wall.body->DestroyFixture(wall.body->GetFixtureList());
+
+            // 2. Creamos la forma nueva con el nuevo width/height
+            b2PolygonShape box;
+            box.SetAsBox(wall.width / 2.0f, wall.height / 2.0f);
+
+            b2FixtureDef fd;
+            fd.shape = &box;
+            fd.friction = 0.0f;      // Mantenemos tu config de hielo
+            fd.restitution = 1.0f;   // Rebote puro
+            
+            // 3. Pegamos el fixture al body existente
+            wall.body->CreateFixture(&fd);
+        }
+    }
+}
+
 std::vector<CustomWall>& PhysicsWorld::getCustomWalls() { return customWalls; }
 b2Body* PhysicsWorld::getWinZoneBody() const { return winZoneBody; }
 void PhysicsWorld::createWinZone() { b2BodyDef bd; bd.type=b2_staticBody; winZonePos[0]=worldWidthMeters/1.0f; winZonePos[1]=worldHeightMeters*0.8f; bd.position.Set(winZonePos[0], winZonePos[1]); winZoneBody=world.CreateBody(&bd); b2PolygonShape b; b.SetAsBox(winZoneSize[0]/2, winZoneSize[1]/2); b2FixtureDef fd; fd.shape=&b; fd.isSensor=true; winZoneBody->CreateFixture(&fd); contactListener.winZoneBody=winZoneBody; }

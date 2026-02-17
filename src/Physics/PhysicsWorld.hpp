@@ -13,6 +13,12 @@ struct CustomWall {
     float height;
     float flashTimer = 0.0f;
     int soundID = 0; 
+
+    bool isExpandable = false;
+    float expansionDelay = 2.0f;   // Tiempo de gracia antes de empezar
+    float expansionSpeed = 0.5f;   // Metros por segundo
+    int expansionAxis = 2;         // 0 = X (Ancho), 1 = Y (Alto), 2 = Ambos
+    float timeAlive = 0.0f;        // Timer interno
 };
 
 class ChaosContactListener : public b2ContactListener {
@@ -76,6 +82,8 @@ public:
 
     float winZonePos[2] = {0.0f, 0.0f};
     float winZoneSize[2] = {2.0f, 2.0f};
+
+    void updateWallExpansion(float dt);
 
 private:
     void createWalls(float widthPixels, float heightPixels);

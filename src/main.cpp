@@ -132,6 +132,7 @@ int main()
             accumulator += dtSec;
             while (accumulator >= timeStep) {
                 physics.step(timeStep, velIter, posIter);
+                physics.updateWallExpansion(dtSec);
                 accumulator -= timeStep;
             }
         } else {
@@ -236,28 +237,58 @@ int main()
         const auto& walls = physics.getCustomWalls();
         int wallToDelete = -1;
 
+// ... Dentro del loop de ImGui, sección Custom Walls List ...
         for (int i = 0; i < walls.size(); ++i) {
             ImGui::PushID(i);
+            // ... (código existente del label) ...
             std::string label = "Wall " + std::to_string(i);
             if (walls[i].soundID > 0) label += " [Note " + std::to_string(walls[i].soundID) + "]";
+            if (walls[i].isExpandable) label += " [EXP]"; // Un indicador visual
 
             if (ImGui::CollapsingHeader(label.c_str())) {
-                CustomWall w = walls[i];
+                // Obtenemos referencia modificable
+                CustomWall& w = physics.getCustomWalls()[i]; 
+                
+                // ... (Posición y Tamaño existen) ...
                 float pos[2] = { w.body->GetPosition().x, w.body->GetPosition().y };
                 float size[2] = { w.width, w.height };
                 int snd = w.soundID;
+                
+                // --- UPDATE FÍSICO MANUAL (lo que ya tenías) ---
                 bool changed = false;
-
                 changed |= ImGui::DragFloat2("Position", pos, 0.1f);
                 changed |= ImGui::DragFloat2("Size", size, 0.1f, 0.5f, 30.0f);
                 changed |= ImGui::SliderInt("Sound ID", &snd, 0, 8);
-
                 if (changed) physics.updateCustomWall(i, pos[0], pos[1], size[0], size[1], snd);
+
+                ImGui::Separator();
+                ImGui::TextColored(ImVec4(0.8f, 0.4f, 1.0f, 1.0f), "EXPANSION PROPERTIES");
+                
+                // 1. Checkbox Activador
+                ImGui::Checkbox("Is Expandable", &w.isExpandable);
+
+                if (w.isExpandable) {
+                    ImGui::Indent();
+                    // 2. Configuración
+                    ImGui::DragFloat("Start Delay (s)", &w.expansionDelay, 0.1f, 0.0f, 60.0f);
+                    ImGui::DragFloat("Growth Speed (m/s)", &w.expansionSpeed, 0.05f, 0.01f, 5.0f);
+                    
+                    // 3. Ejes (Radio Buttons quedan más claros que un combo)
+                    ImGui::Text("Growth Axis:"); 
+                    ImGui::SameLine();
+                    ImGui::RadioButton("X", &w.expansionAxis, 0); ImGui::SameLine();
+                    ImGui::RadioButton("Y", &w.expansionAxis, 1); ImGui::SameLine();
+                    ImGui::RadioButton("XY", &w.expansionAxis, 2);
+                    
+                    // Monitor del tiempo
+                    ImGui::ProgressBar(w.timeAlive / (w.expansionDelay + 0.001f), ImVec2(-1, 10), "Timer");
+                    ImGui::Unindent();
+                }
+
                 if (ImGui::Button("DELETE WALL", ImVec2(-1, 20))) wallToDelete = i;
             }
             ImGui::PopID();
         }
-        if (wallToDelete != -1) physics.removeCustomWall(wallToDelete);
 
         ImGui::Separator();
         ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), "WIN ZONE CONFIG");
