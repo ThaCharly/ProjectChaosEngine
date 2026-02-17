@@ -402,6 +402,46 @@ ImGui::Text("Growth Axis:");
             window.draw(zoneRect);
         }
 
+// --- RENDERIZADO DE TUMBAS (CEMENTERIO) ---
+        // Usamos SFML directo para asegurar que salga en el video
+        const auto& statuses = physics.getRacerStatus();
+        float tombSize = 25.0f; 
+
+        for (const auto& status : statuses) {
+            if (!status.isAlive) {
+                float px = status.deathPos.x * PhysicsWorld::SCALE;
+                float py = status.deathPos.y * PhysicsWorld::SCALE;
+
+                // 1. Base de la tumba (Rectángulo SFML)
+                sf::RectangleShape grave;
+                grave.setSize(sf::Vector2f(tombSize, tombSize));
+                grave.setOrigin(tombSize / 2.0f, tombSize / 2.0f);
+                grave.setPosition(px, py);
+                grave.setFillColor(sf::Color(40, 40, 40, 200));
+                grave.setOutlineColor(sf::Color::Black);
+                grave.setOutlineThickness(2.0f);
+                window.draw(grave);
+
+                // 2. Cruz Roja (VertexArray de líneas)
+                sf::VertexArray cross(sf::Lines, 4);
+                float half = tombSize / 2.0f;
+                float m = 5.0f; // Margen
+
+                // Diagonal 1 (Izquierda-Arriba a Derecha-Abajo)
+                cross[0].position = sf::Vector2f(px - half + m, py - half + m);
+                cross[1].position = sf::Vector2f(px + half - m, py + half - m);
+                
+                // Diagonal 2 (Derecha-Arriba a Izquierda-Abajo)
+                cross[2].position = sf::Vector2f(px + half - m, py - half + m);
+                cross[3].position = sf::Vector2f(px - half + m, py + half - m);
+
+                // Color rojo sangre para todas las puntas
+                for(int k=0; k<4; ++k) cross[k].color = sf::Color(220, 0, 0);
+
+                window.draw(cross);
+            }
+        }
+
         for (size_t i = 0; i < trails.size(); ++i) {
             const auto& pts = trails[i].points;
             if (pts.empty()) continue;

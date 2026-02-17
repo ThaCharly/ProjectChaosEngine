@@ -288,6 +288,7 @@ void PhysicsWorld::updateWallExpansion(float dt) {
         float newHeight = wall.height;
         bool sizeChanged = false;
 
+        // Calcular crecimiento potencial
         if (wall.expansionAxis == 0 || wall.expansionAxis == 2) { newWidth += growth; sizeChanged = true; }
         if (wall.expansionAxis == 1 || wall.expansionAxis == 2) { newHeight += growth; sizeChanged = true; }
 
@@ -311,9 +312,6 @@ void PhysicsWorld::updateWallExpansion(float dt) {
             
             for (size_t j = 0; j < customWalls.size(); ++j) {
                 if (i == j) continue; 
-
-                // >>> FILTRO DE FRANCOTIRADOR <<<
-                // Si el usuario puso un ID específico (ej: 4) y esta pared es la 2, la ignoramos.
                 if (wall.stopTargetIdx != -1 && (int)j != wall.stopTargetIdx) continue;
 
                 const CustomWall& other = customWalls[j];
@@ -325,12 +323,9 @@ void PhysicsWorld::updateWallExpansion(float dt) {
                 float sumHalfWidths = (newWidth / 2.0f) + (other.width / 2.0f);
                 float sumHalfHeights = (newHeight / 2.0f) + (other.height / 2.0f);
 
-                // Colisión detectada
                 if (dx < sumHalfWidths - 0.01f && dy < sumHalfHeights - 0.01f) {
                     wall.isExpandable = false; 
                     std::cout << "Wall " << i << " stopped by target Wall " << j << std::endl;
-                    
-                    // Revertimos para no atravesar
                     newWidth = wall.width;
                     newHeight = wall.height;
                     sizeChanged = false; 
@@ -339,16 +334,51 @@ void PhysicsWorld::updateWallExpansion(float dt) {
             }
         }
 
-        // Aplicar cambios si sobrevivió a los checks
-        if (sizeChanged && (newWidth != wall.width || newHeight != wall.height)) {
-            wall.width = newWidth;
-            wall.height = newHeight;
-            wall.body->DestroyFixture(wall.body->GetFixtureList());
-            b2PolygonShape box;
-            box.SetAsBox(wall.width / 2.0f, wall.height / 2.0f);
-            b2FixtureDef fd; fd.shape = &box; fd.friction = 0.0f; fd.restitution = 1.0f;
-            wall.body->CreateFixture(&fd);
+        // Si la pared paró de crecer, no calculamos muertes ni actualizamos fixtures
+        if (!sizeChanged || (newWidth == wall.width && newHeight == wall.height)) continue;
+
+        // >>> ZONA DE CRUSH: DETECTAR APLASTAMIENTO DE RACERS <<<
+        b2Vec2 wallPos = wall.body->GetPosition();
+        float wallMinX = wallPos.x - newWidth / 2.0f;
+        float wallMaxX = wallPos.x + newWidth / 2.0f;
+        float wallMinY = wallPos.y - newHeight / 2.0f;
+        float wallMaxY = wallPos.y + newHeight / 2.0f;
+
+        float margin = currentRacerSize * 0.1f; 
+
+        for (size_t r = 0; r < dynamicBodies.size(); ++r) {
+            if (!racerStatus[r].isAlive) continue;
+
+            b2Body* racerBody = dynamicBodies[r];
+            b2Vec2 racerPos = racerBody->GetPosition();
+
+            bool isInsideX = (racerPos.x > wallMinX + margin) && (racerPos.x < wallMaxX - margin);
+            bool isInsideY = (racerPos.y > wallMinY + margin) && (racerPos.y < wallMaxY - margin);
+
+            if (isInsideX && isInsideY) {
+                std::cout << ">>> RACER " << r << " CRUSHED by Wall " << i << " <<<" << std::endl;
+                
+                // 1. Marcar como muerto
+                racerStatus[r].isAlive = false;
+                racerStatus[r].deathPos = racerPos;
+
+                // 2. DESACTIVAR DEL MUNDO (FIX BUG)
+                racerBody->SetEnabled(false); // <--- CORREGIDO: SetEnabled
+            }
         }
+        // >>> FIN ZONA DE CRUSH <<<
+
+        // Actualizar física de la pared
+        wall.width = newWidth;
+        wall.height = newHeight;
+        wall.body->DestroyFixture(wall.body->GetFixtureList());
+        b2PolygonShape box;
+        box.SetAsBox(wall.width / 2.0f, wall.height / 2.0f);
+        b2FixtureDef fd;
+        fd.shape = &box;
+        fd.friction = 0.0f;
+        fd.restitution = 1.0f;
+        wall.body->CreateFixture(&fd);
     }
 }
 
@@ -361,8 +391,31 @@ void PhysicsWorld::updateRestitution(float newRest) { currentRestitution=newRest
 void PhysicsWorld::updateFriction(float newFriction) { currentFriction=newFriction; for(auto b:dynamicBodies) for(auto f=b->GetFixtureList();f;f=f->GetNext()) f->SetFriction(newFriction); }
 void PhysicsWorld::updateFixedRotation(bool fixed) { currentFixedRotation=fixed; for(auto b:dynamicBodies) { b->SetFixedRotation(fixed); b->SetAwake(true); } }
 const std::vector<b2Body*>& PhysicsWorld::getDynamicBodies() const { return dynamicBodies; }
-void PhysicsWorld::resetRacers() { int i=0; for(auto b:dynamicBodies){ float x=(worldWidthMeters/5.0f)*(i+1); float y=worldHeightMeters/2.0f; b->SetTransform(b2Vec2(x,y),0); b->SetLinearVelocity(b2Vec2(targetSpeed,targetSpeed)); b->SetAngularVelocity(0); b->SetAwake(true); i++; } gameOver=false; winnerIndex=-1; isPaused=true; }
-void PhysicsWorld::createWalls(float widthPixels, float heightPixels) {
+void PhysicsWorld::resetRacers() { 
+    // --- REVIVIR A TODOS ---
+    for(auto& status : racerStatus) {
+        status.isAlive = true;
+    }
+
+    int i = 0; 
+    for(auto b : dynamicBodies){ 
+        float x = (worldWidthMeters/5.0f)*(i+1); 
+        float y = worldHeightMeters/2.0f; 
+        
+        b->SetEnabled(true); // <--- CORREGIDO: Usamos SetEnabled en lugar de SetActive
+        
+        b->SetTransform(b2Vec2(x, y), 0); 
+        b->SetLinearVelocity(b2Vec2(targetSpeed, targetSpeed)); 
+        b->SetAngularVelocity(0); 
+        b->SetAwake(true); 
+        i++; 
+    } 
+    gameOver = false; 
+    winnerIndex = -1; 
+    isPaused = true; 
+}
+
+    void PhysicsWorld::createWalls(float widthPixels, float heightPixels) {
     float width = worldWidthMeters;
     float height = worldHeightMeters;
     float thick = 0.5f;
@@ -382,4 +435,29 @@ void PhysicsWorld::createWalls(float widthPixels, float heightPixels) {
     // Derecha
     addCustomWall(width, height / 2.0f, thick, height / 2.0f, 4);
 }
-void PhysicsWorld::createRacers() { float s=currentRacerSize; b2PolygonShape b; b.SetAsBox(s/2,s/2); b2FixtureDef fd; fd.shape=&b; fd.density=1; fd.friction=currentFriction; fd.restitution=currentRestitution; for(int i=0;i<4;++i){ b2BodyDef bd; bd.type=b2_dynamicBody; bd.bullet=true; bd.fixedRotation=currentFixedRotation; bd.position.Set((worldWidthMeters/5.0f)*(i+1), worldHeightMeters/2.0f); b2Body* bod=world.CreateBody(&bd); bod->CreateFixture(&fd); bod->SetLinearVelocity(b2Vec2(targetSpeed,targetSpeed)); dynamicBodies.push_back(bod); } }
+void PhysicsWorld::createRacers() { 
+    float s = currentRacerSize; 
+    b2PolygonShape b; 
+    b.SetAsBox(s/2, s/2); 
+    b2FixtureDef fd; 
+    fd.shape = &b; 
+    fd.density = 1; 
+    fd.friction = currentFriction; 
+    fd.restitution = currentRestitution; 
+    
+    for(int i=0; i<4; ++i){ 
+        b2BodyDef bd; 
+        bd.type = b2_dynamicBody; 
+        bd.bullet = true; 
+        bd.fixedRotation = currentFixedRotation; 
+        bd.position.Set((worldWidthMeters/5.0f)*(i+1), worldHeightMeters/2.0f); 
+        b2Body* bod = world.CreateBody(&bd); 
+        bod->CreateFixture(&fd); 
+        bod->SetLinearVelocity(b2Vec2(targetSpeed, targetSpeed)); 
+        dynamicBodies.push_back(bod); 
+    }
+    
+    // --- INICIALIZAR ESTADO DE VIDA ---
+    racerStatus.clear();
+    racerStatus.resize(dynamicBodies.size(), {true, {0,0}});
+}

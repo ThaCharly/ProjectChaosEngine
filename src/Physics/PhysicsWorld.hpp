@@ -7,6 +7,11 @@
 #include <string>
 #include "../Sound/SoundManager.hpp" 
 
+struct RacerStatus {
+    bool isAlive = true;
+    b2Vec2 deathPos = {0, 0};
+};
+
 struct CustomWall {
     b2Body* body;
     float width;
@@ -41,6 +46,8 @@ public:
 class PhysicsWorld {
 public:
     PhysicsWorld(float widthPixels, float heightPixels, SoundManager* soundMgr);
+
+    const std::vector<RacerStatus>& getRacerStatus() const { return racerStatus; }
 
     void step(float timeStep, int velocityIterations, int positionIterations);
     void updateWallVisuals(float dt);
@@ -99,6 +106,7 @@ private:
     std::vector<b2Body*> dynamicBodies;
     std::vector<CustomWall> customWalls;
     b2Body* winZoneBody = nullptr;
+    std::vector<RacerStatus> racerStatus;
 
     ChaosContactListener contactListener;
     std::mt19937 rng;
