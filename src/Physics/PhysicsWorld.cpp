@@ -65,11 +65,12 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
     world.SetGravity(enableGravity ? b2Vec2(0.0f, 9.8f) : b2Vec2(0.0f, 0.0f));
     
     contactListener.bodiesToCheck.clear();
-   // contactListener.wallsHit.clear(); // Limpiamos para el nuevo frame
     contactListener.winnerBody = nullptr;
 
+    // 1. Dejar que Box2D calcule rebotes y resuelva colisiones
     world.Step(timeStep, velIter, posIter);
 
+    // --- CHECK VICTORIA (Igual) ---
     if (contactListener.winnerBody != nullptr) {
         gameOver = true;
         for (int i = 0; i < dynamicBodies.size(); ++i) {
@@ -82,10 +83,13 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
         return; 
     }
 
+    // --- CHAOS MODE (Igual) ---
     if (enableChaos) {
         for (b2Body* body : contactListener.bodiesToCheck) {
             if (randomFloat(0.0f, 1.0f) < chaosChance) {
                 b2Vec2 vel = body->GetLinearVelocity();
+                // En modo Caos rompemos un poco la regla de 45 grados para dar variedad,
+                // pero el EnforceSpeed de abajo la va a corregir al siguiente frame.
                 float angleDev = randomFloat(-0.5f, 0.5f);
                 float cs = cos(angleDev); float sn = sin(angleDev);
                 float px = vel.x * cs - vel.y * sn;
@@ -95,23 +99,42 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
         }
     }
 
-if (enforceSpeed) {
+    // --- ENFORCE SPEED: MODO "PONG" (DIAGONALES FORZADAS) ---
+    if (enforceSpeed) {
         for (b2Body* b : dynamicBodies) {
-            b2Vec2 vel = b->GetLinearVelocity();
-            float speed = vel.Length();
+            if (!b->IsEnabled()) continue;
 
-            if (speed > targetSpeed + 2.0f) {
-                vel *= 0.98f;
-                b->SetLinearVelocity(vel);
+            b2Vec2 vel = b->GetLinearVelocity();
+
+            // LÓGICA BINARIA:
+            // No nos importa el vector. Nos importa el signo.
+            // Vel X tiene que ser +Speed o -Speed.
+            // Vel Y tiene que ser +Speed o -Speed.
+            
+            // --- EJE X ---
+            if (std::abs(vel.x) < 0.1f) {
+                // Si la física lo frenó (0), tiramos una moneda.
+                // Esto evita el deadlock vertical.
+                vel.x = (randomFloat(0.0f, 1.0f) > 0.5f) ? targetSpeed : -targetSpeed;
+            } else {
+                // Si ya se mueve, mantenemos el sentido pero forzamos la magnitud.
+                vel.x = (vel.x > 0.0f) ? targetSpeed : -targetSpeed;
             }
-            // ACÁ ESTÁ LA MAGIA: Agregamos el chequeo (speed > 1.0f)
-            // Si la velocidad es muy baja, es porque acaba de chocar. 
-            // NO normalices vectores enanos, dejá que la física respire un frame.
-            else if ((speed < targetSpeed - 0.5f || speed > targetSpeed + 0.5f) && speed > 1.0f) { 
-                vel.Normalize();
-                vel *= targetSpeed; 
-                b->SetLinearVelocity(vel);
+
+            // --- EJE Y ---
+            if (std::abs(vel.y) < 0.1f) {
+                // Si la física lo frenó (0), tiramos una moneda.
+                // Esto evita el deadlock horizontal.
+                vel.y = (randomFloat(0.0f, 1.0f) > 0.5f) ? targetSpeed : -targetSpeed;
+            } else {
+                // Mantenemos sentido, forzamos magnitud.
+                vel.y = (vel.y > 0.0f) ? targetSpeed : -targetSpeed;
             }
+
+            // APLICAMOS LA VELOCIDAD CUADRADA
+            // Nota: La velocidad total (hipotenusa) será targetSpeed * 1.414 (raiz de 2).
+            // Pero cumple tu regla: "15 en X, 15 en Y".
+            b->SetLinearVelocity(vel);
         }
     }
 }
