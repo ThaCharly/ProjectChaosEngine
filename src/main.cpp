@@ -466,49 +466,52 @@ const auto& customWalls = physics.getCustomWalls();
 const auto& statuses = physics.getRacerStatus();
 float tombSize = 25.0f; 
 
-for (const auto& status : statuses) {
+// CAMBIO: Usamos 'size_t i' para saber qué racer es y robarle el color
+for (size_t i = 0; i < statuses.size(); ++i) {
+    const auto& status = statuses[i];
+
     if (!status.isAlive) {
         float px = status.deathPos.x * PhysicsWorld::SCALE;
         float py = status.deathPos.y * PhysicsWorld::SCALE;
 
-        // 1. Base de la tumba (Caja oscura)
+        // Recuperamos el color del racer muerto
+        // (Usamos el índice 'i' protegido con módulo por si agregás más racers después)
+        sf::Color deathColor = (i < 4) ? racerColors[i] : sf::Color::White;
+
+        // 1. Base de la tumba (Caja oscura con borde de SU color)
         sf::RectangleShape grave;
         grave.setSize(sf::Vector2f(tombSize, tombSize));
         grave.setOrigin(tombSize / 2.0f, tombSize / 2.0f);
         grave.setPosition(px, py);
-        grave.setFillColor(sf::Color(20, 20, 20, 220)); // Un poco más oscura
-        grave.setOutlineColor(sf::Color(100, 0, 0));    // Borde rojo oscuro
+        grave.setFillColor(sf::Color(20, 20, 20, 240)); // Casi negra
+        grave.setOutlineColor(deathColor);              // <--- BORDE DEL COLOR DEL RACER
         grave.setOutlineThickness(2.0f);
         window.draw(grave);
 
-        // 2. Cruz Roja (FIX: Usamos rectángulos gruesos en vez de líneas)
-        float crossThick = 5.0f;               // Grosor de la cruz
-        float crossLen = tombSize * 0.8f;      // Largo de los brazos
+        // 2. La Cruz (También de SU color)
+        float crossThick = 5.0f;               
+        float crossLen = tombSize * 0.8f;      
 
         sf::RectangleShape bar1(sf::Vector2f(crossLen, crossThick));
         sf::RectangleShape bar2(sf::Vector2f(crossLen, crossThick));
 
-        // Centramos las barras
         bar1.setOrigin(crossLen / 2.0f, crossThick / 2.0f);
         bar2.setOrigin(crossLen / 2.0f, crossThick / 2.0f);
 
-        // Las ponemos en posición
         bar1.setPosition(px, py);
         bar2.setPosition(px, py);
 
-        // Rotamos para hacer la X
         bar1.setRotation(45.0f);
         bar2.setRotation(-45.0f);
 
-        // Color rojo sangre brillante
-        bar1.setFillColor(sf::Color(255, 0, 0));
-        bar2.setFillColor(sf::Color(255, 0, 0));
+        // Pintamos la cruz con el color del finado
+        bar1.setFillColor(deathColor); // <--- CRUZ CYAN/MAGENTA/ETC
+        bar2.setFillColor(deathColor);
 
         window.draw(bar1);
         window.draw(bar2);
     }
 }
-
         for (size_t i = 0; i < trails.size(); ++i) {
             const auto& pts = trails[i].points;
             if (pts.empty()) continue;
