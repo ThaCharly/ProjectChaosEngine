@@ -302,6 +302,17 @@ for (int i = 0; i < walls.size(); ++i) {
                     physics.updateWallColor(i, currentColorIdx);
                 }
 
+                ImGui::Separator();
+ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "DANGER ZONE"); // Título rojo
+
+// Checkbox para hacerlo letal
+if (ImGui::Checkbox("IS DEADLY (Spike)", &w.isDeadly)) {
+    // Truquito visual: Si lo hacés mortal, cambiale el color a Rojo Sangre automáticamente
+    if (w.isDeadly) {
+        physics.updateWallColor(i, 5); // 5 es "Hot Red" en tu paleta
+    }
+}
+
                 // --- EXPANSION PROPERTIES ---
                 ImGui::Separator();
                 ImGui::TextColored(ImVec4(0.8f, 0.4f, 1.0f, 1.0f), "EXPANSION PROPERTIES");
@@ -417,6 +428,13 @@ const auto& customWalls = physics.getCustomWalls();
             // El borde también "palpita" un poco con el golpe
             sf::Color currentOutline = lerpColor(wall.neonColor, sf::Color::White, wall.flashTimer * 0.5f);
 
+            if (wall.isDeadly) {
+    // Hacemos que titile un poco en rojo oscuro
+    float dangerPulse = (std::sin(globalTime * 10.0f) + 1.0f) * 0.5f; // Rápido
+    currentFill = sf::Color(100 + (dangerPulse * 50), 0, 0, 255); // Rojo pulsante
+    currentOutline = sf::Color::Red;
+}
+
             r.setFillColor(currentFill); 
             r.setOutlineColor(currentOutline);
             
@@ -445,44 +463,51 @@ const auto& customWalls = physics.getCustomWalls();
         }
 
 // --- RENDERIZADO DE TUMBAS (CEMENTERIO) ---
-        // Usamos SFML directo para asegurar que salga en el video
-        const auto& statuses = physics.getRacerStatus();
-        float tombSize = 25.0f; 
+const auto& statuses = physics.getRacerStatus();
+float tombSize = 25.0f; 
 
-        for (const auto& status : statuses) {
-            if (!status.isAlive) {
-                float px = status.deathPos.x * PhysicsWorld::SCALE;
-                float py = status.deathPos.y * PhysicsWorld::SCALE;
+for (const auto& status : statuses) {
+    if (!status.isAlive) {
+        float px = status.deathPos.x * PhysicsWorld::SCALE;
+        float py = status.deathPos.y * PhysicsWorld::SCALE;
 
-                // 1. Base de la tumba (Rectángulo SFML)
-                sf::RectangleShape grave;
-                grave.setSize(sf::Vector2f(tombSize, tombSize));
-                grave.setOrigin(tombSize / 2.0f, tombSize / 2.0f);
-                grave.setPosition(px, py);
-                grave.setFillColor(sf::Color(40, 40, 40, 200));
-                grave.setOutlineColor(sf::Color::Black);
-                grave.setOutlineThickness(2.0f);
-                window.draw(grave);
+        // 1. Base de la tumba (Caja oscura)
+        sf::RectangleShape grave;
+        grave.setSize(sf::Vector2f(tombSize, tombSize));
+        grave.setOrigin(tombSize / 2.0f, tombSize / 2.0f);
+        grave.setPosition(px, py);
+        grave.setFillColor(sf::Color(20, 20, 20, 220)); // Un poco más oscura
+        grave.setOutlineColor(sf::Color(100, 0, 0));    // Borde rojo oscuro
+        grave.setOutlineThickness(2.0f);
+        window.draw(grave);
 
-                // 2. Cruz Roja (VertexArray de líneas)
-                sf::VertexArray cross(sf::Lines, 4);
-                float half = tombSize / 2.0f;
-                float m = 5.0f; // Margen
+        // 2. Cruz Roja (FIX: Usamos rectángulos gruesos en vez de líneas)
+        float crossThick = 5.0f;               // Grosor de la cruz
+        float crossLen = tombSize * 0.8f;      // Largo de los brazos
 
-                // Diagonal 1 (Izquierda-Arriba a Derecha-Abajo)
-                cross[0].position = sf::Vector2f(px - half + m, py - half + m);
-                cross[1].position = sf::Vector2f(px + half - m, py + half - m);
-                
-                // Diagonal 2 (Derecha-Arriba a Izquierda-Abajo)
-                cross[2].position = sf::Vector2f(px + half - m, py - half + m);
-                cross[3].position = sf::Vector2f(px - half + m, py + half - m);
+        sf::RectangleShape bar1(sf::Vector2f(crossLen, crossThick));
+        sf::RectangleShape bar2(sf::Vector2f(crossLen, crossThick));
 
-                // Color rojo sangre para todas las puntas
-                for(int k=0; k<4; ++k) cross[k].color = sf::Color(220, 0, 0);
+        // Centramos las barras
+        bar1.setOrigin(crossLen / 2.0f, crossThick / 2.0f);
+        bar2.setOrigin(crossLen / 2.0f, crossThick / 2.0f);
 
-                window.draw(cross);
-            }
-        }
+        // Las ponemos en posición
+        bar1.setPosition(px, py);
+        bar2.setPosition(px, py);
+
+        // Rotamos para hacer la X
+        bar1.setRotation(45.0f);
+        bar2.setRotation(-45.0f);
+
+        // Color rojo sangre brillante
+        bar1.setFillColor(sf::Color(255, 0, 0));
+        bar2.setFillColor(sf::Color(255, 0, 0));
+
+        window.draw(bar1);
+        window.draw(bar2);
+    }
+}
 
         for (size_t i = 0; i < trails.size(); ++i) {
             const auto& pts = trails[i].points;
@@ -507,7 +532,10 @@ const auto& customWalls = physics.getCustomWalls();
             window.draw(va);
         }
 
+        const auto& currentStatuses = physics.getRacerStatus(); // Asegurate de tener esto a mano
+
         for (size_t i = 0; i < bodies.size(); ++i) {
+            if (i < currentStatuses.size() && !currentStatuses[i].isAlive) continue;
             b2Body* body = bodies[i];
             b2Vec2 pos = body->GetPosition();
             float angle = body->GetAngle();

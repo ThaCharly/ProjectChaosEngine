@@ -70,6 +70,36 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
     // 1. Dejar que Box2D calcule rebotes y resuelva colisiones
     world.Step(timeStep, velIter, posIter);
 
+    for (size_t i = 0; i < dynamicBodies.size(); ++i) {
+        if (!racerStatus[i].isAlive) continue; // Si ya murió, next.
+
+        b2Body* racer = dynamicBodies[i];
+        
+        // Recorremos la lista de contactos actuales de este racer
+        for (b2ContactEdge* ce = racer->GetContactList(); ce; ce = ce->next) {
+            if (!ce->contact->IsTouching()) continue;
+
+            // Obtenemos el otro cuerpo con el que choca
+            b2Body* other = ce->other;
+
+            // Chequeamos si ese "otro" es una pared nuestra
+            for (const auto& wall : customWalls) {
+                if (wall.body == other) {
+                    // SI ES MORTAL, CHAU RACER
+                    if (wall.isDeadly) {
+                        racerStatus[i].isAlive = false;
+                        racerStatus[i].deathPos = racer->GetPosition();
+                        racer->SetEnabled(false); // Lo sacamos de la simulación
+                        std::cout << ">>> RACER " << i << " MURIO EN PINCHOS <<<" << std::endl;
+                        
+                        // Opcional: Sonido de muerte o fx visual
+                    }
+                    break; // Ya encontramos la pared, salimos del loop de walls
+                }
+            }
+        }
+    }
+
     // --- CHECK VICTORIA (Igual) ---
     if (contactListener.winnerBody != nullptr) {
         gameOver = true;

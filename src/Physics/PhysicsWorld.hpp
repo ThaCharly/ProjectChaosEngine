@@ -30,6 +30,7 @@ struct CustomWall {
     bool stopOnContact = false;    // ¿Frenar si toca otra pared?
     int stopTargetIdx = -1;
     float maxSize = 0.0f;
+    bool isDeadly = false;
 
     int colorIndex = 0; // <--- NUEVO: Para saber qué color de la paleta usa
     sf::Color baseFillColor = sf::Color(20, 20, 25);   // Relleno oscuro
