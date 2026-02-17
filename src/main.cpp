@@ -249,42 +249,64 @@ int main()
         int wallToDelete = -1;
 
 // ... Dentro del loop de ImGui, sección Custom Walls List ...
-        for (int i = 0; i < walls.size(); ++i) {
+for (int i = 0; i < walls.size(); ++i) {
             ImGui::PushID(i);
-            // ... (código existente del label) ...
             std::string label = "Wall " + std::to_string(i);
             if (walls[i].soundID > 0) label += " [Note " + std::to_string(walls[i].soundID) + "]";
-            if (walls[i].isExpandable) label += " [EXP]"; // Un indicador visual
+            // Indicador visual si es expandible
+            if (walls[i].isExpandable) label += " [EXP]"; 
 
             if (ImGui::CollapsingHeader(label.c_str())) {
-                // Obtenemos referencia modificable
-                CustomWall& w = physics.getCustomWalls()[i]; 
+                CustomWall& w = physics.getCustomWalls()[i]; // Referencia para editar
                 
-                // ... (Posición y Tamaño existen) ...
                 float pos[2] = { w.body->GetPosition().x, w.body->GetPosition().y };
                 float size[2] = { w.width, w.height };
                 int snd = w.soundID;
                 
-                // --- UPDATE FÍSICO MANUAL (lo que ya tenías) ---
+                // --- PHYSICS PROPS ---
                 bool changed = false;
                 changed |= ImGui::DragFloat2("Position", pos, 0.1f);
                 changed |= ImGui::DragFloat2("Size", size, 0.1f, 0.5f, 30.0f);
                 changed |= ImGui::SliderInt("Sound ID", &snd, 0, 8);
+                
                 if (changed) physics.updateCustomWall(i, pos[0], pos[1], size[0], size[1], snd);
 
+                // --- APPEARANCE (NUEVO & CORREGIDO) ---
+                ImGui::Separator();
+                ImGui::Text("Appearance");
+
+                // 1. Conversión de sf::Color (0-255) a ImVec4 (0.0-1.0) para ImGui
+                sf::Color c = w.neonColor;
+                ImVec4 imColor = ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, 1.0f);
+
+                // 2. Botón de Preview (No hace nada al clickear, solo muestra el color)
+                ImGui::ColorButton("##preview", imColor, ImGuiColorEditFlags_NoTooltip, ImVec2(20, 20));
+                ImGui::SameLine();
+
+                // 3. Selector de Tema
+                int currentColorIdx = w.colorIndex;
+                const char* colorNames[] = { 
+                    "Cyan (Tron)", "Magenta (Synth)", "Toxic Lime", "Electric Orange", 
+                    "Plasma Purple", "Hot Red", "Gold", "Deep Blue", "Hot Pink" 
+                };
+                
+                // Asegurate que el array coincida con el tamaño de tu paleta en PhysicsWorld
+                if (ImGui::Combo("Neon Color", &currentColorIdx, colorNames, IM_ARRAYSIZE(colorNames))) {
+                    physics.updateWallColor(i, currentColorIdx);
+                }
+
+                // --- EXPANSION PROPERTIES ---
                 ImGui::Separator();
                 ImGui::TextColored(ImVec4(0.8f, 0.4f, 1.0f, 1.0f), "EXPANSION PROPERTIES");
                 
-                // 1. Checkbox Activador
                 ImGui::Checkbox("Is Expandable", &w.isExpandable);
 
                 if (w.isExpandable) {
                     ImGui::Indent();
-                    // 2. Configuración
-ImGui::DragFloat("Start Delay (s)", &w.expansionDelay, 0.1f, 0.0f, 60.0f);
-                    ImGui::DragFloat("Growth Speed (m/s)", &w.expansionSpeed, 0.05f, 0.01f, 10.0f); // Subí el max a 10 por las dudas
+                    ImGui::DragFloat("Start Delay (s)", &w.expansionDelay, 0.1f, 0.0f, 60.0f);
+                    ImGui::DragFloat("Growth Speed (m/s)", &w.expansionSpeed, 0.05f, 0.01f, 10.0f);
                     
-ImGui::Text("Growth Axis:"); 
+                    ImGui::Text("Growth Axis:"); 
                     ImGui::SameLine();
                     ImGui::RadioButton("X", &w.expansionAxis, 0); ImGui::SameLine();
                     ImGui::RadioButton("Y", &w.expansionAxis, 1); ImGui::SameLine();
@@ -293,20 +315,15 @@ ImGui::Text("Growth Axis:");
                     ImGui::Separator();
                     ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "STOP CONDITIONS");
                     
-                    // A: FRENAR POR CONTACTO
                     ImGui::Checkbox("Stop on Contact", &w.stopOnContact);
-                    
                     if (w.stopOnContact) {
                         ImGui::Indent();
                         ImGui::TextDisabled("(?) -1 = Any Wall");
-                        // Input para elegir la pared objetivo
                         ImGui::InputInt("Target Wall ID", &w.stopTargetIdx);
                         ImGui::Unindent();
                     }
 
-                    // B: FRENAR POR TAMAÑO
                     ImGui::DragFloat("Max Size Limit", &w.maxSize, 0.5f, 0.0f, 100.0f);
-
                     ImGui::ProgressBar(w.timeAlive / (w.expansionDelay + 0.001f), ImVec2(-1, 10), "Timer");
                     ImGui::Unindent();
                 }
@@ -315,6 +332,7 @@ ImGui::Text("Growth Axis:");
             }
             ImGui::PopID();
         }
+        if (wallToDelete != -1) physics.removeCustomWall(wallToDelete);
 
         ImGui::Separator();
         ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), "WIN ZONE CONFIG");
@@ -331,6 +349,8 @@ ImGui::Text("Growth Axis:");
             ImGui::SliderFloat("Chaos %", &physics.chaosChance, 0.0f, 0.5f);
             ImGui::SliderFloat("Boost", &physics.chaosBoost, 1.0f, 3.0f);
         }
+
+        
         ImGui::End();
 
         // --- IMGUI RACER INSPECTOR ---

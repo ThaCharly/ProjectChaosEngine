@@ -95,15 +95,19 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
         }
     }
 
-    if (enforceSpeed) {
+if (enforceSpeed) {
         for (b2Body* b : dynamicBodies) {
             b2Vec2 vel = b->GetLinearVelocity();
             float speed = vel.Length();
+
             if (speed > targetSpeed + 2.0f) {
                 vel *= 0.98f;
                 b->SetLinearVelocity(vel);
             }
-            else if (speed < targetSpeed - 0.5f || speed > targetSpeed + 0.5f) { 
+            // ACÁ ESTÁ LA MAGIA: Agregamos el chequeo (speed > 1.0f)
+            // Si la velocidad es muy baja, es porque acaba de chocar. 
+            // NO normalices vectores enanos, dejá que la física respire un frame.
+            else if ((speed < targetSpeed - 0.5f || speed > targetSpeed + 0.5f) && speed > 1.0f) { 
                 vel.Normalize();
                 vel *= targetSpeed; 
                 b->SetLinearVelocity(vel);
@@ -158,12 +162,24 @@ void PhysicsWorld::saveMap(const std::string& filename) {
     file << "WINZONE " << winZonePos[0] << " " << winZonePos[1] << " " 
          << winZoneSize[0] << " " << winZoneSize[1] << "\n";
 
-    for (const auto& wall : customWalls) {
-        b2Vec2 pos = wall.body->GetPosition();
-        file << "WALL " << pos.x << " " << pos.y << " " 
-             << wall.width << " " << wall.height << " " << wall.soundID << "\n";
+    for (const auto& w : customWalls) {
+        b2Vec2 pos = w.body->GetPosition();
+        // Guardamos TODOS los atributos en una sola línea larga
+        file << "WALL " 
+             << pos.x << " " << pos.y << " " 
+             << w.width << " " << w.height << " " 
+             << w.soundID << " "
+             << w.colorIndex << " "      // <--- Color
+             << w.isExpandable << " "    // <--- Expandible
+             << w.expansionDelay << " "
+             << w.expansionSpeed << " "
+             << w.expansionAxis << " "
+             << w.stopOnContact << " "
+             << w.stopTargetIdx << " "
+             << w.maxSize << "\n";
     }
 
+    // ... (Guardado de Racers igual que antes) ...
     for (size_t i = 0; i < dynamicBodies.size(); ++i) {
         b2Body* b = dynamicBodies[i];
         b2Vec2 pos = b->GetPosition();
@@ -178,6 +194,7 @@ void PhysicsWorld::saveMap(const std::string& filename) {
     file.close();
 }
 
+// 5. LOAD MAP INTELIGENTE (Compatible con versiones viejas y nuevas)
 void PhysicsWorld::loadMap(const std::string& filename) {
     std::ifstream file(filename);
     if (!file.is_open()) return;
@@ -192,25 +209,45 @@ void PhysicsWorld::loadMap(const std::string& filename) {
         ss >> type;
 
         if (type == "CONFIG") {
-            float spd, size, rest; bool chaos;
+                        float spd, size, rest; bool chaos;
             ss >> spd >> size >> rest >> chaos;
             targetSpeed = spd; enableChaos = chaos;
             updateRacerSize(size); updateRestitution(rest);
-        }
-        else if (type == "WINZONE") {
+         }
+        else if (type == "WINZONE") {             
             float x, y, w, h;
             ss >> x >> y >> w >> h;
             updateWinZone(x, y, w, h);
-        } 
+        }
         else if (type == "WALL") {
             float x, y, w, h;
             int sid = 0;
-            ss >> x >> y >> w >> h;
-            if (!(ss >> sid)) sid = 0; 
+            // Datos básicos
+            ss >> x >> y >> w >> h >> sid;
+            
             addCustomWall(x, y, w, h, sid);
+            
+            // Obtenemos la referencia a la pared recién creada (la última)
+            CustomWall& newWall = customWalls.back();
+
+            // Intentamos leer los datos extendidos (si existen)
+            int cIdx;
+            if (ss >> cIdx) updateWallColor(customWalls.size() - 1, cIdx);
+            
+            // Propiedades de Expansión
+            bool isExp;
+            if (ss >> isExp) {
+                newWall.isExpandable = isExp;
+                ss >> newWall.expansionDelay 
+                   >> newWall.expansionSpeed 
+                   >> newWall.expansionAxis 
+                   >> newWall.stopOnContact 
+                   >> newWall.stopTargetIdx 
+                   >> newWall.maxSize;
+            }
         }
-        else if (type == "RACER") {
-            int id; float x, y, vx, vy, a, av;
+        else if (type == "RACER") { 
+                        int id; float x, y, vx, vy, a, av;
             ss >> id >> x >> y >> vx >> vy >> a >> av;
             if (id >= 0 && id < dynamicBodies.size()) {
                 b2Body* b = dynamicBodies[id];
@@ -218,8 +255,7 @@ void PhysicsWorld::loadMap(const std::string& filename) {
                 b->SetLinearVelocity(b2Vec2(vx, vy));
                 b->SetAngularVelocity(av);
                 b->SetAwake(true);
-            }
-        }
+         }}
     }
     isPaused = true;
     file.close();
@@ -239,52 +275,86 @@ sf::Color getNeonColor(int index) {
         sf::Color(57, 255, 20),    // Toxic Lime
         sf::Color(255, 165, 0),    // Electric Orange
         sf::Color(147, 0, 255),    // Plasma Purple
-        sf::Color(255, 0, 60)      // Hot Red
+        sf::Color(255, 0, 60),      // Hot Red
+        sf::Color(255, 215, 0),    // 6: Gold (NUEVO)
+        sf::Color(0, 100, 255),    // 7: Deep Blue (NUEVO)
+        sf::Color(255, 105, 180)   // 8: Hot Pink (NUEVO)
     };
     return palette[index % palette.size()];
 }
 
+const std::vector<sf::Color>& PhysicsWorld::getPalette() {
+    static const std::vector<sf::Color> palette = {
+        sf::Color(0, 255, 255),    // 0: Cyan (Tron)
+        sf::Color(255, 0, 255),    // 1: Magenta (Synthwave)
+        sf::Color(57, 255, 20),    // 2: Toxic Lime
+        sf::Color(255, 165, 0),    // 3: Electric Orange
+        sf::Color(147, 0, 255),    // 4: Plasma Purple
+        sf::Color(255, 0, 60),     // 5: Hot Red
+        sf::Color(255, 215, 0),    // 6: Gold
+        sf::Color(0, 100, 255),    // 7: Deep Blue
+        sf::Color(255, 105, 180)   // 8: Hot Pink
+    };
+    return palette;
+}
+
 void PhysicsWorld::addCustomWall(float x, float y, float w, float h, int soundID) {
-    b2BodyDef bd;
-    bd.type = b2_staticBody;
-    bd.position.Set(x, y);
+b2BodyDef bd; bd.type = b2_staticBody; bd.position.Set(x, y);
     b2Body* body = world.CreateBody(&bd);
-    b2PolygonShape box;
-    box.SetAsBox(w / 2.0f, h / 2.0f);
-    b2FixtureDef fd;
-    fd.shape = &box;
-    fd.friction = 0.0f;
-    fd.restitution = 1.0f;
+    b2PolygonShape box; box.SetAsBox(w / 2.0f, h / 2.0f);
+    b2FixtureDef fd; fd.shape = &box; fd.friction = 0.0f; fd.restitution = 1.0f;
     body->CreateFixture(&fd);
-    
-    // --- LÓGICA DE COLOR ---
-    // Elegimos un color basado en el ID del sonido o aleatorio para variar
-    // Si soundID es 0, usamos uno random basado en la posición para que sea determinístico
-    int colorIdx = (soundID > 0) ? (soundID - 1) : ((int)(x + y) % 6);
-    sf::Color neon = getNeonColor(colorIdx);
-    
-    // Color de relleno: Una versión muy oscura del neón
-    sf::Color fill = sf::Color(neon.r / 5, neon.g / 5, neon.b / 5, 240);
-    
-    // Color de flash: El neón pero mezclado con blanco (más brillante)
-    sf::Color flash = sf::Color(
-        std::min(255, neon.r + 100),
-        std::min(255, neon.g + 100),
-        std::min(255, neon.b + 100)
-    );
 
     CustomWall newWall;
     newWall.body = body;
     newWall.width = w;
     newWall.height = h;
     newWall.soundID = soundID;
-    
-    // Asignamos la paleta
-    newWall.baseFillColor = fill;
-    newWall.neonColor = neon;
-    newWall.flashColor = flash;
 
-    customWalls.push_back(newWall); 
+    // Asignación de Color Inicial
+    // Si soundID > 0, tratamos de machear el color, sino aleatorio o por posición
+    int colorIdx = (soundID > 0) ? (soundID - 1) : ((int)(x + y) % getPalette().size());
+    
+    // Forzamos que esté en rango
+    if (colorIdx < 0) colorIdx = 0;
+    colorIdx = colorIdx % getPalette().size();
+
+    newWall.colorIndex = colorIdx; // Guardamos el índice
+    
+    // Calculamos los colores derivados
+    const auto& pal = getPalette();
+    sf::Color neon = pal[colorIdx];
+    newWall.baseFillColor = sf::Color(neon.r / 5, neon.g / 5, neon.b / 5, 240);
+    newWall.neonColor = neon;
+    newWall.flashColor = sf::Color(
+        std::min(255, neon.r + 100),
+        std::min(255, neon.g + 100),
+        std::min(255, neon.b + 100)
+    );
+
+    customWalls.push_back(newWall);
+}
+
+void PhysicsWorld::updateWallColor(int index, int newColorIndex) {
+    if (index < 0 || index >= customWalls.size()) return;
+    
+    CustomWall& w = customWalls[index];
+    const auto& pal = getPalette();
+    
+    // Safety check
+    if (newColorIndex < 0) newColorIndex = 0;
+    newColorIndex = newColorIndex % pal.size();
+
+    w.colorIndex = newColorIndex;
+    sf::Color neon = pal[newColorIndex];
+    
+    w.baseFillColor = sf::Color(neon.r / 5, neon.g / 5, neon.b / 5, 240);
+    w.neonColor = neon;
+    w.flashColor = sf::Color(
+        std::min(255, neon.r + 100),
+        std::min(255, neon.g + 100),
+        std::min(255, neon.b + 100)
+    );
 }
 
 void PhysicsWorld::updateCustomWall(int index, float x, float y, float w, float h, int soundID) {

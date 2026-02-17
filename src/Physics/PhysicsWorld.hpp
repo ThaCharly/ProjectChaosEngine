@@ -31,6 +31,7 @@ struct CustomWall {
     int stopTargetIdx = -1;
     float maxSize = 0.0f;
 
+    int colorIndex = 0; // <--- NUEVO: Para saber qué color de la paleta usa
     sf::Color baseFillColor = sf::Color(20, 20, 25);   // Relleno oscuro
     sf::Color neonColor = sf::Color::White;            // Borde neón
     sf::Color flashColor = sf::Color(255, 255, 255);   // Color al golpear
@@ -71,6 +72,9 @@ public:
     
     void removeCustomWall(int index);
     std::vector<CustomWall>& getCustomWalls(); 
+
+    static const std::vector<sf::Color>& getPalette(); // Exponer la paleta estática
+    void updateWallColor(int wallIndex, int newColorIndex); // Cambiar color en caliente
 
     static constexpr float SCALE = 30.0f;
 
