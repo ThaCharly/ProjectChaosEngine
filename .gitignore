@@ -10,6 +10,8 @@ bin/
 output/
 output2/
 output22/
+*.mid
+song.txt
 
 CMakeFiles/
 CMakeCache.txt

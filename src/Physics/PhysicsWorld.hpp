@@ -106,7 +106,16 @@ public:
 
     void updateWallExpansion(float dt);
 
+    // ... dentro de public ...
+    void loadSong(const std::string& filename);
+    bool isSongLoaded = false;
+
 private:
+// ... dentro de private ...
+    std::vector<int> songNotes;
+    int currentNoteIndex = 0;
+
+    
     void createWalls(float widthPixels, float heightPixels);
     void createRacers();
     void createWinZone();

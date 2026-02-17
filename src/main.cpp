@@ -189,6 +189,13 @@ int main()
         ImGui::SetNextWindowSize(ImVec2(350, 750), ImGuiCond_FirstUseEver);
         ImGui::Begin("Director Control", nullptr);
 
+        // En la sección de ImGui, agregá esto:
+static char songFile[128] = "song.txt";
+ImGui::InputText("Song File", songFile, 128);
+if (ImGui::Button("LOAD SONG")) {
+    physics.loadSong(songFile);
+}
+
         ImGui::TextColored(ImVec4(1, 0.2f, 0.2f, 1), "CAMERA & ACTION");
         if (recorder.isRecording) {
             ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor::HSV(0.0f, 0.6f, 0.6f));

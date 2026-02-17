@@ -143,20 +143,50 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
 // --- ACTUALIZACIÓN VISUAL Y AUDIO ---
 void PhysicsWorld::updateWallVisuals(float dt) {
     
-    // Recorremos las paredes que fueron golpeadas (acumuladas en los steps)
+    // Recorremos las paredes que fueron golpeadas
     for (b2Body* body : contactListener.wallsHit) {
+        
+        // --- LÓGICA DE CANCIÓN ---
+        int noteToPlay = -1;
+        
+        if (isSongLoaded && !songNotes.empty()) {
+            // Sacamos la nota actual
+            noteToPlay = songNotes[currentNoteIndex];
+            
+            // Avanzamos el indice (Loop infinito)
+            currentNoteIndex = (currentNoteIndex + 1) % songNotes.size();
+        }
+
         for (auto& wall : customWalls) {
             if (wall.body == body) {
                 // 1. FLASH VISUAL
                 wall.flashTimer = 1.0f;
 
-                // 2. SONIDO
-                if (soundManager && wall.soundID > 0) {
-                    soundManager->playSound(
-                        wall.soundID, 
-                        wall.body->GetPosition().x, 
-                        worldWidthMeters
+                // Si hay canción, sobreescribimos el color del flash basado en la nota
+                // Notas graves (bajas) -> Azul/Violeta. Notas agudas (altas) -> Rojo/Naranja
+                if (noteToPlay != -1) {
+                    // Mapeo trucho de nota MIDI (ej: 40 a 90) a índice de paleta (0 a 8)
+                    int pSize = getPalette().size();
+                    int colorIdx = (noteToPlay % 12) % pSize; // Usamos el semitono para el color
+                    
+                    // Actualizamos el color del flash dinámicamente
+                    sf::Color neon = getPalette()[colorIdx];
+                    wall.flashColor = sf::Color(
+                        std::min(255, neon.r + 150),
+                        std::min(255, neon.g + 150),
+                        std::min(255, neon.b + 150)
                     );
+                }
+
+                // 2. SONIDO
+                if (soundManager) {
+                    if (noteToPlay != -1) {
+                        // MODO CANCIÓN: Toca la nota secuencial
+                        soundManager->playMidiNote(noteToPlay);
+                    } else if (wall.soundID > 0) {
+                        // MODO CLÁSICO: Toca el sonido de la pared
+                        soundManager->playSound(wall.soundID, 0, 0);
+                    }
                 }
             }
         }
@@ -170,8 +200,6 @@ void PhysicsWorld::updateWallVisuals(float dt) {
         }
     }
 
-    // --- ¡AQUÍ ES DONDE SE LIMPIA! ---
-    // Limpiamos la lista DESPUÉS de haber procesado los choques
     contactListener.wallsHit.clear();
 }
 
@@ -608,4 +636,36 @@ void PhysicsWorld::createRacers() {
     // --- INICIALIZAR ESTADO DE VIDA ---
     racerStatus.clear();
     racerStatus.resize(dynamicBodies.size(), {true, {0,0}});
+}
+
+void PhysicsWorld::loadSong(const std::string& filename) {
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Error cargando cancion: " << filename << std::endl;
+        return;
+    }
+
+    songNotes.clear();
+    currentNoteIndex = 0;
+    std::string line;
+    bool readingNotes = false;
+
+    while (std::getline(file, line)) {
+        if (line == "SONG_START") {
+            readingNotes = true;
+            continue;
+        }
+        if (line == "SONG_END") {
+            break;
+        }
+        if (readingNotes) {
+            try {
+                int note = std::stoi(line);
+                songNotes.push_back(note);
+            } catch (...) {}
+        }
+    }
+    
+    isSongLoaded = !songNotes.empty();
+    std::cout << "Cancion cargada! Notas: " << songNotes.size() << std::endl;
 }
