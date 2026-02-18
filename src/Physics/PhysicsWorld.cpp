@@ -46,8 +46,10 @@ PhysicsWorld::PhysicsWorld(float widthPixels, float heightPixels, SoundManager* 
     contactListener.worldWidth = widthPixels / SCALE;
     world.SetContactListener(&contactListener);
 
-    worldWidthMeters = widthPixels / SCALE;
-    worldHeightMeters = heightPixels / SCALE;
+    this->SCALE = widthPixels / 24.0f;
+
+    worldWidthMeters = 24.0f;
+    worldHeightMeters = heightPixels / this->SCALE;
 
     createWalls(widthPixels, heightPixels);
     createWinZone();

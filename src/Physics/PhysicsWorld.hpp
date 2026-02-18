@@ -84,7 +84,7 @@ public:
     static const std::vector<sf::Color>& getPalette();
     void updateWallColor(int wallIndex, int newColorIndex);
 
-    static constexpr float SCALE = 30.0f;
+    float SCALE = 30.0f;
 
     void updateRacerSize(float newSize);
     void updateRestitution(float newRest);

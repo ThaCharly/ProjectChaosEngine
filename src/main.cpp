@@ -155,7 +155,7 @@ int main()
             for (size_t i = 0; i < bodies.size(); ++i) {
                 if (i >= trails.size()) break;
                 b2Vec2 pos = bodies[i]->GetPosition();
-                sf::Vector2f p(pos.x * PhysicsWorld::SCALE, pos.y * PhysicsWorld::SCALE);
+                sf::Vector2f p(pos.x * physics.SCALE, pos.y * physics.SCALE);
                 trails[i].points.push_front(p);
                 float speed = bodies[i]->GetLinearVelocity().Length();
                 size_t maxPoints = (size_t)(speed * 3.0f) + 10; 
@@ -445,8 +445,8 @@ if (ImGui::Checkbox("IS DEADLY (Spike)", &w.isDeadly)) {
         const auto& customWalls = physics.getCustomWalls();
         for (const auto& wall : customWalls) {
             b2Vec2 pos = wall.body->GetPosition();
-            float wPx = wall.width * PhysicsWorld::SCALE;
-            float hPx = wall.height * PhysicsWorld::SCALE;
+            float wPx = wall.width * physics.SCALE;
+            float hPx = wall.height * physics.SCALE;
             
             // --- FIX: ELECCIÓN DE FORMA ---
             sf::Shape* shapeToDraw = nullptr;
@@ -460,7 +460,7 @@ if (ImGui::Checkbox("IS DEADLY (Spike)", &w.isDeadly)) {
                 triShape.setPoint(1, sf::Vector2f(wPx / 2.0f, hPx / 2.0f));  // Base Der
                 triShape.setPoint(2, sf::Vector2f(-wPx / 2.0f, hPx / 2.0f)); // Base Izq
                 
-                triShape.setPosition(pos.x * PhysicsWorld::SCALE, pos.y * PhysicsWorld::SCALE);
+                triShape.setPosition(pos.x * physics.SCALE, pos.y * physics.SCALE);
                 // Convertir radianes a grados para SFML
                 triShape.setRotation(wall.body->GetAngle() * 180.0f / 3.14159f);
                 
@@ -469,7 +469,7 @@ if (ImGui::Checkbox("IS DEADLY (Spike)", &w.isDeadly)) {
                 // --- DIBUJAR PARED (Rectángulo) ---
                 rectShape.setSize(sf::Vector2f(wPx, hPx));
                 rectShape.setOrigin(wPx / 2.0f, hPx / 2.0f);
-                rectShape.setPosition(pos.x * PhysicsWorld::SCALE, pos.y * PhysicsWorld::SCALE);
+                rectShape.setPosition(pos.x * physics.SCALE, pos.y * physics.SCALE);
                 rectShape.setRotation(wall.body->GetAngle() * 180.0f / 3.14159f);
                 
                 shapeToDraw = &rectShape;
@@ -498,13 +498,13 @@ if (ImGui::Checkbox("IS DEADLY (Spike)", &w.isDeadly)) {
         if (zone) {
             b2Vec2 pos = zone->GetPosition();
             sf::RectangleShape zoneRect;
-            float w = physics.winZoneSize[0] * PhysicsWorld::SCALE;
-            float h = physics.winZoneSize[1] * PhysicsWorld::SCALE;
+            float w = physics.winZoneSize[0] * physics.SCALE;
+            float h = physics.winZoneSize[1] * physics.SCALE;
             float pulse = (std::sin(globalTime * 3.0f) + 1.0f) * 0.5f; 
             float alpha = 50.0f + pulse * 100.0f;
             zoneRect.setSize(sf::Vector2f(w, h));
             zoneRect.setOrigin(w/2.0f, h/2.0f);
-            zoneRect.setPosition(pos.x * PhysicsWorld::SCALE, pos.y * PhysicsWorld::SCALE);
+            zoneRect.setPosition(pos.x * physics.SCALE, pos.y * physics.SCALE);
             zoneRect.setFillColor(sf::Color(255, 215, 0, (sf::Uint8)alpha)); 
             zoneRect.setOutlineColor(sf::Color::Yellow);
             zoneRect.setOutlineThickness(3.0f);
@@ -520,8 +520,8 @@ for (size_t i = 0; i < statuses.size(); ++i) {
     const auto& status = statuses[i];
 
     if (!status.isAlive) {
-        float px = status.deathPos.x * PhysicsWorld::SCALE;
-        float py = status.deathPos.y * PhysicsWorld::SCALE;
+        float px = status.deathPos.x * physics.SCALE;
+        float py = status.deathPos.y * physics.SCALE;
 
         // Recuperamos el color del racer muerto
         // (Usamos el índice 'i' protegido con módulo por si agregás más racers después)
@@ -591,11 +591,11 @@ for (size_t i = 0; i < statuses.size(); ++i) {
             b2Body* body = bodies[i];
             b2Vec2 pos = body->GetPosition();
             float angle = body->GetAngle();
-            float drawSize = physics.currentRacerSize * PhysicsWorld::SCALE;
+            float drawSize = physics.currentRacerSize * physics.SCALE;
             sf::RectangleShape rect;
             rect.setSize(sf::Vector2f(drawSize, drawSize));
             rect.setOrigin(drawSize / 2.0f, drawSize / 2.0f);
-            rect.setPosition(pos.x * PhysicsWorld::SCALE, pos.y * PhysicsWorld::SCALE);
+            rect.setPosition(pos.x * physics.SCALE, pos.y * physics.SCALE);
             rect.setRotation(angle * 180.0f / 3.14159f);
             if (i < 4) rect.setOutlineColor(racerColors[i]);
             else rect.setOutlineColor(sf::Color::White);

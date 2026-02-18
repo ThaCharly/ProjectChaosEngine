@@ -8,6 +8,10 @@
 Recorder::Recorder(int width, int height, int fps, const std::string& outputFilename) 
     : width(width), height(height), fps(fps), finalFilename(outputFilename) 
 {
+
+    this->width = width + (width % 2);
+    this->height = height + (height % 2);
+    
     if (!captureTexture.create(width, height)) {
         throw std::runtime_error("No se pudo crear la textura de captura");
     }
