@@ -489,7 +489,7 @@ int main()
         }
 
         const auto& statuses = physics.getRacerStatus();
-        float tombSize = 25.0f; 
+        float tombSize = 36.0f; 
 
         for (size_t i = 0; i < statuses.size(); ++i) {
             const auto& status = statuses[i];
@@ -545,25 +545,64 @@ int main()
             float baseWidth = physics.currentRacerSize * physics.SCALE; 
 
             for (size_t j = 0; j < pts.size(); ++j) {
-                sf::Vector2f normal(1, 0);
+sf::Vector2f normal(1, 0);
                 
-                // 2. Cálculo de normal mejorado (evita que el último punto rompa la orientación)
-                if (j < pts.size() - 1) {
-                    sf::Vector2f dir = pts[j+1] - pts[j];
+                // 2. Cálculo de normal con "Miter Joint" (Bisectriz) para evitar tajos en las esquinas
+                if (j == 0) {
+                    // Cabeza (Primer punto)
+                    sf::Vector2f dir = pts[1] - pts[0];
                     float len = std::sqrt(dir.x*dir.x + dir.y*dir.y);
                     if (len > 0.001f) normal = sf::Vector2f(-dir.y/len, dir.x/len);
-                } else if (j > 0) {
+                } else if (j == pts.size() - 1) {
+                    // Cola (Último punto)
                     sf::Vector2f dir = pts[j] - pts[j-1];
                     float len = std::sqrt(dir.x*dir.x + dir.y*dir.y);
                     if (len > 0.001f) normal = sf::Vector2f(-dir.y/len, dir.x/len);
+                } else {
+                    // Esquinas (Puntos intermedios): Promediamos normales
+                    sf::Vector2f d1 = pts[j] - pts[j-1];
+                    sf::Vector2f d2 = pts[j+1] - pts[j];
+                    
+                    float l1 = std::sqrt(d1.x*d1.x + d1.y*d1.y);
+                    float l2 = std::sqrt(d2.x*d2.x + d2.y*d2.y);
+                    
+                    sf::Vector2f n1(1, 0), n2(1, 0);
+                    if (l1 > 0.001f) n1 = sf::Vector2f(-d1.y/l1, d1.x/l1);
+                    if (l2 > 0.001f) n2 = sf::Vector2f(-d2.y/l2, d2.x/l2);
+                    
+                    // Sumamos para sacar la bisectriz
+                    normal = n1 + n2;
+                    float lenN = std::sqrt(normal.x*normal.x + normal.y*normal.y);
+                    
+                    if (lenN > 0.001f) {
+                        normal.x /= lenN;
+                        normal.y /= lenN;
+                        
+                        // Factor de inglete (Miter). Si no hacemos esto, la esquina se "afina".
+                        // Lo limitamos a 0.2f para que no explote si el ángulo es casi 180 grados.
+                        float miter = normal.x * n1.x + normal.y * n1.y;
+                        if (miter > 0.2f) { 
+                            normal.x /= miter;
+                            normal.y /= miter;
+                        }
+                    } else {
+                        // Fallback por si justo es un rebote perfectamente opuesto
+                        normal = n1; 
+                    }
                 }
 
-                // Porcentaje de vida del segmento (1.0 = pegado al racer, 0.0 = final de la cola)
+// Porcentaje de vida del segmento (1.0 = pegado al racer, 0.0 = final de la cola)
                 float lifePct = 1.0f - ((float)j / (float)pts.size());
                 
                 // 3. Tapering curvo: usamos raíz para que el grosor no caiga en línea recta
                 float widthPct = std::pow(lifePct, 0.6f); 
-                float currentWidth = baseWidth * widthPct;
+                
+                // AHORA SÍ: Independizamos el tamaño del brillo y del núcleo
+                // El halo (glow) desborda un 160% el tamaño del racer para iluminar el mapa
+                float glowWidth = baseWidth * widthPct * 1.4f;
+                // El núcleo (core) arranca en un 95% del tamaño del racer para que encaje perfecto
+                // y no parpadee feo por salir de los bordes del cuadrado.
+                float coreWidth = baseWidth * widthPct * 0.5f;
                 
                 sf::Color baseColor = trails[i].color;
                 
@@ -572,9 +611,9 @@ int main()
                 // El alpha cae cuadráticamente para que se disipe suave en los bordes
                 glowColor.a = (sf::Uint8)(std::pow(lifePct, 1.5f) * 160.0f); 
                 
-                glowVA[j*2].position = pts[j] + normal * (currentWidth * 0.5f);
+                glowVA[j*2].position = pts[j] + normal * (glowWidth * 0.5f);
                 glowVA[j*2].color = glowColor;
-                glowVA[j*2+1].position = pts[j] - normal * (currentWidth * 0.5f);
+                glowVA[j*2+1].position = pts[j] - normal * (glowWidth * 0.5f);
                 glowVA[j*2+1].color = glowColor;
 
                 // --- CAPA INTERIOR (CORE) ---
@@ -584,9 +623,6 @@ int main()
                 coreColor.g = (baseColor.g + 255 * 2) / 3;
                 coreColor.b = (baseColor.b + 255 * 2) / 3;
                 coreColor.a = (sf::Uint8)(lifePct * 240.0f);
-                
-                // El núcleo luminoso ocupa solo el 35% del grosor de la estela
-                float coreWidth = currentWidth * 0.35f; 
                 
                 coreVA[j*2].position = pts[j] + normal * (coreWidth * 0.5f);
                 coreVA[j*2].color = coreColor;
