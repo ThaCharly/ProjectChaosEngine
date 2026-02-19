@@ -11,7 +11,8 @@ public:
     Recorder(int width, int height, int fps, const std::string& outputFilename);
     ~Recorder();
 
-    void addFrame(const sf::Window& window);
+    // Borrá la de sf::Window y poné esta:
+void addFrame(const sf::Texture& texture);
     void addAudioEvent(const sf::Int16* samples, std::size_t sampleCount, float volume);
     
     // MÉTODO NUEVO: Cierra todo, guarda y fusiona.

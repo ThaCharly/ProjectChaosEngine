@@ -97,7 +97,7 @@ public:
     float currentFriction = 0.0f;
     bool currentFixedRotation = true;
 
-    float targetSpeed = 15.0f;
+    float targetSpeed = 8.0f;
     bool enforceSpeed = true;
     bool enableGravity = false;
     bool isPaused = false;

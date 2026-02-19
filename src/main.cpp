@@ -10,11 +10,10 @@
 
 #include "Physics/PhysicsWorld.hpp"
 #include "Recorder/Recorder.hpp"
-#include "Sound/SoundManager.hpp" // <--- Incluir
+#include "Sound/SoundManager.hpp" 
 
 namespace fs = std::filesystem;
 
-// ... (Struct Trail y createGridTexture quedan igual) ...
 struct Trail {
     std::deque<sf::Vector2f> points;
     sf::Color color;
@@ -57,22 +56,34 @@ void SoundManager::sendToRecorder(const sf::Int16* samples, std::size_t count, f
 
 int main()
 {
-    const unsigned int WIDTH = 720;
-    const unsigned int HEIGHT = 720;
+    // --- RESOLUCIÓN OFF-SCREEN (VIDEO FINAL) ---
+    const unsigned int RENDER_WIDTH = 1080;
+    const unsigned int RENDER_HEIGHT = 1080;
+
+    // --- RESOLUCIÓN DE LA VENTANA (TU MONITOR) ---
+    const unsigned int WINDOW_WIDTH = 720;
+    const unsigned int WINDOW_HEIGHT = 720;
+    
     const unsigned int FPS = 60;
     const std::string VIDEO_DIRECTORY = "../output/video.mp4";
 
-    sf::RenderWindow window(sf::VideoMode(WIDTH, HEIGHT), "ChaosEngine - Neon Lab");
+    // Ventana bloqueada para que no la redimensionen y rompan el aspect ratio
+    sf::RenderWindow window(sf::VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), "ChaosEngine - Neon Lab", sf::Style::Titlebar | sf::Style::Close);
     window.setFramerateLimit(FPS);
 
     if (!ImGui::SFML::Init(window)) return -1;
 
-    // 1. INICIALIZAR AUDIO (Sintetizador Automático)
-    SoundManager soundManager; 
-    // Ya no cargamos nada, el constructor generó los tonos.
+    // --- FRAMEBUFFER GIGANTE ---
+    sf::RenderTexture gameBuffer;
+    if (!gameBuffer.create(RENDER_WIDTH, RENDER_HEIGHT)) {
+        std::cerr << "Pah, te quedaste sin VRAM bo. Falló el RenderTexture." << std::endl;
+        return -1;
+    }
 
-    // 2. FÍSICA
-    PhysicsWorld physics(WIDTH, HEIGHT, &soundManager);
+    SoundManager soundManager; 
+
+    // OJO ACÁ: La física labura con el tamaño de renderizado gigante
+    PhysicsWorld physics(RENDER_WIDTH, RENDER_HEIGHT, &soundManager);
     physics.isPaused = true; 
     const auto& bodies = physics.getDynamicBodies();
 
@@ -80,7 +91,8 @@ int main()
     fs::path outputDir = videoPath.parent_path();
     if (!fs::exists(outputDir)) fs::create_directories(outputDir);
 
-    Recorder recorder(WIDTH, HEIGHT, FPS, VIDEO_DIRECTORY);
+    // El grabador también labura con el tamaño gigante
+    Recorder recorder(RENDER_WIDTH, RENDER_HEIGHT, FPS, VIDEO_DIRECTORY);
     recorder.isRecording = false; 
 
     soundManager.setRecorder(&recorder);
@@ -94,9 +106,9 @@ int main()
     float accumulator = 0.0f;
     float globalTime = 0.0f;
 
-    float victoryTimer = 0.0f;       // Acumulador de tiempo post-victoria
-    bool victorySequenceStarted = false; // Flag para imprimir una sola vez
-    const float VICTORY_DELAY = 0.5f; // Medio segundo de gracia
+    float victoryTimer = 0.0f;       
+    bool victorySequenceStarted = false; 
+    const float VICTORY_DELAY = 0.5f; 
 
     const char* racerNames[] = { "Cyan", "Magenta", "Green", "Yellow" };
     
@@ -114,7 +126,8 @@ int main()
         ImVec4(1, 0.8f, 0, 1)    
     };
 
-    sf::Texture gridTexture = createGridTexture(WIDTH, HEIGHT);
+    // La grilla tiene que cubrir el mapa de 1080p entero
+    sf::Texture gridTexture = createGridTexture(RENDER_WIDTH, RENDER_HEIGHT);
     sf::Sprite background(gridTexture);
 
     std::vector<Trail> trails(4);
@@ -151,7 +164,6 @@ int main()
         }
 
         if (!physics.isPaused) {
-            
             for (size_t i = 0; i < bodies.size(); ++i) {
                 if (i >= trails.size()) break;
                 b2Vec2 pos = bodies[i]->GetPosition();
@@ -163,23 +175,15 @@ int main()
             }
         }
 
-// --- LÓGICA DE VICTORIA CON DELAY ---
         if (physics.gameOver) {
-            // 1. Iniciar secuencia si es la primera vez
             if (!victorySequenceStarted) {
                 std::cout << ">>> VICTORY DETECTED: Racer " << physics.winnerIndex << ". Finishing recording..." << std::endl;
                 victorySequenceStarted = true;
-                // Opcional: Podrías frenar el tiempo (physics.isPaused = true) 
-                // pero si querés ver como entra suavemente, dejalo correr.
             }
-
-            // 2. Acumular tiempo
             victoryTimer += dtSec;
-
-            // 3. Chequear si pasó el tiempo
             if (victoryTimer >= VICTORY_DELAY) {
                 std::cout << ">>> CLOSING SIMULATION." << std::endl;
-                recorder.stop(); // <--- FUSIÓN CRÍTICA AQUÍ
+                recorder.stop(); 
                 window.close();
             }
         }
@@ -189,12 +193,11 @@ int main()
         ImGui::SetNextWindowSize(ImVec2(350, 750), ImGuiCond_FirstUseEver);
         ImGui::Begin("Director Control", nullptr);
 
-        // En la sección de ImGui, agregá esto:
-static char songFile[128] = "song.txt";
-ImGui::InputText("Song File", songFile, 128);
-if (ImGui::Button("LOAD SONG")) {
-    physics.loadSong(songFile);
-}
+        static char songFile[128] = "song.txt";
+        ImGui::InputText("Song File", songFile, 128);
+        if (ImGui::Button("LOAD SONG")) {
+            physics.loadSong(songFile);
+        }
 
         ImGui::TextColored(ImVec4(1, 0.2f, 0.2f, 1), "CAMERA & ACTION");
         if (recorder.isRecording) {
@@ -220,8 +223,8 @@ if (ImGui::Button("LOAD SONG")) {
         if (ImGui::Button("RESET RACE", ImVec2(-1, 20))) {
             physics.resetRacers();
             for(auto& t : trails) t.points.clear();
-            victoryTimer = 0.0f; // <--- RESETEAR
-            victorySequenceStarted = false; // <--- RESETEAR
+            victoryTimer = 0.0f; 
+            victorySequenceStarted = false; 
         }
 
         ImGui::Separator();
@@ -237,9 +240,7 @@ if (ImGui::Button("LOAD SONG")) {
         ImGui::Separator();
         ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "WALL BUILDER");
         
-        // Selector de Sonido para la próxima pared
         static int nextWallSoundID = 1;
-        // Mapeo simple de nombres de notas para ayudar
         const char* noteNames[] = { "Mute", "Do (C4)", "Re (D4)", "Mi (E4)", "Fa (F4)", "Sol (G4)", "La (A4)", "Si (B4)", "Do (C5)" };
         if (nextWallSoundID >= 0 && nextWallSoundID <= 8) {
             ImGui::Text("Next Sound: %s", noteNames[nextWallSoundID]);
@@ -255,22 +256,19 @@ if (ImGui::Button("LOAD SONG")) {
         const auto& walls = physics.getCustomWalls();
         int wallToDelete = -1;
 
-// ... Dentro del loop de ImGui, sección Custom Walls List ...
-for (int i = 0; i < walls.size(); ++i) {
+        for (int i = 0; i < walls.size(); ++i) {
             ImGui::PushID(i);
             std::string label = "Wall " + std::to_string(i);
             if (walls[i].soundID > 0) label += " [Note " + std::to_string(walls[i].soundID) + "]";
-            // Indicador visual si es expandible
             if (walls[i].isExpandable) label += " [EXP]"; 
 
             if (ImGui::CollapsingHeader(label.c_str())) {
-                CustomWall& w = physics.getCustomWalls()[i]; // Referencia para editar
+                CustomWall& w = physics.getCustomWalls()[i]; 
                 
                 float pos[2] = { w.body->GetPosition().x, w.body->GetPosition().y };
                 float size[2] = { w.width, w.height };
                 int snd = w.soundID;
                 
-                // --- PHYSICS PROPS ---
                 bool changed = false;
                 changed |= ImGui::DragFloat2("Position", pos, 0.1f);
                 changed |= ImGui::DragFloat2("Size", size, 0.1f, 0.5f, 30.0f);
@@ -278,74 +276,58 @@ for (int i = 0; i < walls.size(); ++i) {
                 
                 if (changed) physics.updateCustomWall(i, pos[0], pos[1], size[0], size[1], snd, w.shapeType, w.rotation);
 
-                // --- APPEARANCE (NUEVO & CORREGIDO) ---
                 ImGui::Separator();
                 ImGui::Text("Appearance");
 
-                // BOTÓN NUEVO: AGREGAR PINCHO
-if (ImGui::Button("ADD SPIKE (1m)", ImVec2(-1, 30))) {
-    // ID 0, Shape 1 (Triángulo), Rotación 0
-    physics.addCustomWall(12.0f, 12.0f, 1.0f, 1.0f, 0, 1, 0.0f);
-}
+                if (ImGui::Button("ADD SPIKE (1m)", ImVec2(-1, 30))) {
+                    physics.addCustomWall(12.0f, 12.0f, 1.0f, 1.0f, 0, 1, 0.0f);
+                }
 
-int sType = w.shapeType;
-float rotDeg = w.rotation * 180.0f / 3.14159f; // Mostramos en grados
+                int sType = w.shapeType;
+                float rotDeg = w.rotation * 180.0f / 3.14159f; 
 
-ImGui::Separator();
-ImGui::Text("Geometry");
-bool geoChanged = false;
+                ImGui::Separator();
+                ImGui::Text("Geometry");
+                bool geoChanged = false;
 
-// Selector de Forma
-if (ImGui::RadioButton("Box", sType == 0)) { sType = 0; geoChanged = true; } ImGui::SameLine();
-if (ImGui::RadioButton("Spike", sType == 1)) { sType = 1; geoChanged = true; w.isDeadly = true; }
+                if (ImGui::RadioButton("Box", sType == 0)) { sType = 0; geoChanged = true; } ImGui::SameLine();
+                if (ImGui::RadioButton("Spike", sType == 1)) { sType = 1; geoChanged = true; w.isDeadly = true; }
 
-// Slider de Rotación (Snapping a 90 grados queda cómodo)
-if (ImGui::SliderFloat("Rotation", &rotDeg, 0.0f, 360.0f, "%.0f deg")) {
-    geoChanged = true;
-}
-// Botones rápidos de rotación
-if (ImGui::Button("0°")) { rotDeg = 0.0f; geoChanged = true; } ImGui::SameLine();
-if (ImGui::Button("90°")) { rotDeg = 90.0f; geoChanged = true; } ImGui::SameLine();
-if (ImGui::Button("180°")) { rotDeg = 180.0f; geoChanged = true; } ImGui::SameLine();
-if (ImGui::Button("270°")) { rotDeg = 270.0f; geoChanged = true; }
+                if (ImGui::SliderFloat("Rotation", &rotDeg, 0.0f, 360.0f, "%.0f deg")) geoChanged = true;
+                
+                if (ImGui::Button("0°")) { rotDeg = 0.0f; geoChanged = true; } ImGui::SameLine();
+                if (ImGui::Button("90°")) { rotDeg = 90.0f; geoChanged = true; } ImGui::SameLine();
+                if (ImGui::Button("180°")) { rotDeg = 180.0f; geoChanged = true; } ImGui::SameLine();
+                if (ImGui::Button("270°")) { rotDeg = 270.0f; geoChanged = true; }
 
-if (geoChanged || changed) { // 'changed' es tu bool anterior de pos/size
-    float rotRad = rotDeg * 3.14159f / 180.0f;
-    physics.updateCustomWall(i, pos[0], pos[1], size[0], size[1], snd, sType, rotRad);
-}
+                if (geoChanged || changed) { 
+                    float rotRad = rotDeg * 3.14159f / 180.0f;
+                    physics.updateCustomWall(i, pos[0], pos[1], size[0], size[1], snd, sType, rotRad);
+                }
 
-                // 1. Conversión de sf::Color (0-255) a ImVec4 (0.0-1.0) para ImGui
                 sf::Color c = w.neonColor;
                 ImVec4 imColor = ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, 1.0f);
 
-                // 2. Botón de Preview (No hace nada al clickear, solo muestra el color)
                 ImGui::ColorButton("##preview", imColor, ImGuiColorEditFlags_NoTooltip, ImVec2(20, 20));
                 ImGui::SameLine();
 
-                // 3. Selector de Tema
                 int currentColorIdx = w.colorIndex;
                 const char* colorNames[] = { 
                     "Cyan (Tron)", "Magenta (Synth)", "Toxic Lime", "Electric Orange", 
                     "Plasma Purple", "Hot Red", "Gold", "Deep Blue", "Hot Pink" 
                 };
                 
-                // Asegurate que el array coincida con el tamaño de tu paleta en PhysicsWorld
                 if (ImGui::Combo("Neon Color", &currentColorIdx, colorNames, IM_ARRAYSIZE(colorNames))) {
                     physics.updateWallColor(i, currentColorIdx);
                 }
 
                 ImGui::Separator();
-ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "DANGER ZONE"); // Título rojo
+                ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "DANGER ZONE"); 
 
-// Checkbox para hacerlo letal
-if (ImGui::Checkbox("IS DEADLY (Spike)", &w.isDeadly)) {
-    // Truquito visual: Si lo hacés mortal, cambiale el color a Rojo Sangre automáticamente
-    if (w.isDeadly) {
-        physics.updateWallColor(i, 5); // 5 es "Hot Red" en tu paleta
-    }
-}
+                if (ImGui::Checkbox("IS DEADLY (Spike)", &w.isDeadly)) {
+                    if (w.isDeadly) physics.updateWallColor(i, 5); 
+                }
 
-                // --- EXPANSION PROPERTIES ---
                 ImGui::Separator();
                 ImGui::TextColored(ImVec4(0.8f, 0.4f, 1.0f, 1.0f), "EXPANSION PROPERTIES");
                 
@@ -400,10 +382,8 @@ if (ImGui::Checkbox("IS DEADLY (Spike)", &w.isDeadly)) {
             ImGui::SliderFloat("Boost", &physics.chaosBoost, 1.0f, 3.0f);
         }
 
-        
         ImGui::End();
 
-        // --- IMGUI RACER INSPECTOR ---
         ImGui::SetNextWindowPos(ImVec2(370, 10), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(340, 600), ImGuiCond_FirstUseEver);
         ImGui::Begin("Racer Inspector", nullptr);
@@ -438,9 +418,11 @@ if (ImGui::Checkbox("IS DEADLY (Spike)", &w.isDeadly)) {
         }
         ImGui::End(); 
 
-        // --- DRAW ---
-        window.clear();
-        window.draw(background);
+        // ==============================================
+        // --- DRAW: RENDERIZADO AL BUFFER GIGANTE ---
+        // ==============================================
+        gameBuffer.clear(sf::Color(10, 10, 10)); // Usamos el FBO en vez de window
+        gameBuffer.draw(background);
 
         const auto& customWalls = physics.getCustomWalls();
         for (const auto& wall : customWalls) {
@@ -448,25 +430,21 @@ if (ImGui::Checkbox("IS DEADLY (Spike)", &w.isDeadly)) {
             float wPx = wall.width * physics.SCALE;
             float hPx = wall.height * physics.SCALE;
             
-            // --- FIX: ELECCIÓN DE FORMA ---
             sf::Shape* shapeToDraw = nullptr;
             sf::RectangleShape rectShape;
             sf::ConvexShape triShape;
 
             if (wall.shapeType == 1) {
-                // --- DIBUJAR PINCHO (Triángulo) ---
                 triShape.setPointCount(3);
-                triShape.setPoint(0, sf::Vector2f(0.0f, -hPx / 2.0f));       // Punta
-                triShape.setPoint(1, sf::Vector2f(wPx / 2.0f, hPx / 2.0f));  // Base Der
-                triShape.setPoint(2, sf::Vector2f(-wPx / 2.0f, hPx / 2.0f)); // Base Izq
+                triShape.setPoint(0, sf::Vector2f(0.0f, -hPx / 2.0f));       
+                triShape.setPoint(1, sf::Vector2f(wPx / 2.0f, hPx / 2.0f));  
+                triShape.setPoint(2, sf::Vector2f(-wPx / 2.0f, hPx / 2.0f)); 
                 
                 triShape.setPosition(pos.x * physics.SCALE, pos.y * physics.SCALE);
-                // Convertir radianes a grados para SFML
                 triShape.setRotation(wall.body->GetAngle() * 180.0f / 3.14159f);
                 
                 shapeToDraw = &triShape;
             } else {
-                // --- DIBUJAR PARED (Rectángulo) ---
                 rectShape.setSize(sf::Vector2f(wPx, hPx));
                 rectShape.setOrigin(wPx / 2.0f, hPx / 2.0f);
                 rectShape.setPosition(pos.x * physics.SCALE, pos.y * physics.SCALE);
@@ -475,7 +453,6 @@ if (ImGui::Checkbox("IS DEADLY (Spike)", &w.isDeadly)) {
                 shapeToDraw = &rectShape;
             }
 
-            // --- COLORES ---
             sf::Color currentFill = lerpColor(wall.baseFillColor, wall.flashColor, wall.flashTimer);
             sf::Color currentOutline = lerpColor(wall.neonColor, sf::Color::White, wall.flashTimer * 0.5f);
 
@@ -491,100 +468,138 @@ if (ImGui::Checkbox("IS DEADLY (Spike)", &w.isDeadly)) {
             float thickness = 2.0f + (wall.flashTimer * 2.0f);
             shapeToDraw->setOutlineThickness(-thickness);
 
-            // --- DIBUJAMOS LA FORMA ELEGIDA ---
-            window.draw(*shapeToDraw);
+            gameBuffer.draw(*shapeToDraw); // DIBUJAMOS AL BUFFER
 
-        b2Body* zone = physics.getWinZoneBody();
-        if (zone) {
-            b2Vec2 pos = zone->GetPosition();
-            sf::RectangleShape zoneRect;
-            float w = physics.winZoneSize[0] * physics.SCALE;
-            float h = physics.winZoneSize[1] * physics.SCALE;
-            float pulse = (std::sin(globalTime * 3.0f) + 1.0f) * 0.5f; 
-            float alpha = 50.0f + pulse * 100.0f;
-            zoneRect.setSize(sf::Vector2f(w, h));
-            zoneRect.setOrigin(w/2.0f, h/2.0f);
-            zoneRect.setPosition(pos.x * physics.SCALE, pos.y * physics.SCALE);
-            zoneRect.setFillColor(sf::Color(255, 215, 0, (sf::Uint8)alpha)); 
-            zoneRect.setOutlineColor(sf::Color::Yellow);
-            zoneRect.setOutlineThickness(3.0f);
-            window.draw(zoneRect);
-        }}
-
-// --- RENDERIZADO DE TUMBAS (CEMENTERIO) ---
-const auto& statuses = physics.getRacerStatus();
-float tombSize = 25.0f; 
-
-// CAMBIO: Usamos 'size_t i' para saber qué racer es y robarle el color
-for (size_t i = 0; i < statuses.size(); ++i) {
-    const auto& status = statuses[i];
-
-    if (!status.isAlive) {
-        float px = status.deathPos.x * physics.SCALE;
-        float py = status.deathPos.y * physics.SCALE;
-
-        // Recuperamos el color del racer muerto
-        // (Usamos el índice 'i' protegido con módulo por si agregás más racers después)
-        sf::Color deathColor = (i < 4) ? racerColors[i] : sf::Color::White;
-
-        // 1. Base de la tumba (Caja oscura con borde de SU color)
-        sf::RectangleShape grave;
-        grave.setSize(sf::Vector2f(tombSize, tombSize));
-        grave.setOrigin(tombSize / 2.0f, tombSize / 2.0f);
-        grave.setPosition(px, py);
-        grave.setFillColor(sf::Color(20, 20, 20, 240)); // Casi negra
-        grave.setOutlineColor(deathColor);              // <--- BORDE DEL COLOR DEL RACER
-        grave.setOutlineThickness(2.0f);
-        window.draw(grave);
-
-        // 2. La Cruz (También de SU color)
-        float crossThick = 5.0f;               
-        float crossLen = tombSize * 0.8f;      
-
-        sf::RectangleShape bar1(sf::Vector2f(crossLen, crossThick));
-        sf::RectangleShape bar2(sf::Vector2f(crossLen, crossThick));
-
-        bar1.setOrigin(crossLen / 2.0f, crossThick / 2.0f);
-        bar2.setOrigin(crossLen / 2.0f, crossThick / 2.0f);
-
-        bar1.setPosition(px, py);
-        bar2.setPosition(px, py);
-
-        bar1.setRotation(45.0f);
-        bar2.setRotation(-45.0f);
-
-        // Pintamos la cruz con el color del finado
-        bar1.setFillColor(deathColor); // <--- CRUZ CYAN/MAGENTA/ETC
-        bar2.setFillColor(deathColor);
-
-        window.draw(bar1);
-        window.draw(bar2);
-    }
-}
-        for (size_t i = 0; i < trails.size(); ++i) {
-            const auto& pts = trails[i].points;
-            if (pts.empty()) continue;
-            sf::VertexArray va(sf::TriangleStrip, pts.size() * 2);
-            float width = 8.0f;
-            for (size_t j = 0; j < pts.size(); ++j) {
-                sf::Vector2f normal(1, 0);
-                if (j + 1 < pts.size()) {
-                    sf::Vector2f dir = pts[j+1] - pts[j];
-                    float len = std::sqrt(dir.x*dir.x + dir.y*dir.y);
-                    if(len > 0.001f) normal = sf::Vector2f(-dir.y/len, dir.x/len);
-                }
-                float alphaPct = 1.0f - (float)j / (float)pts.size();
-                sf::Color c = trails[i].color;
-                c.a = (sf::Uint8)(alphaPct * 150.0f);
-                va[j*2].position = pts[j] + normal * (width * alphaPct * 0.5f);
-                va[j*2].color = c;
-                va[j*2+1].position = pts[j] - normal * (width * alphaPct * 0.5f);
-                va[j*2+1].color = c;
+            b2Body* zone = physics.getWinZoneBody();
+            if (zone) {
+                b2Vec2 pos = zone->GetPosition();
+                sf::RectangleShape zoneRect;
+                float w = physics.winZoneSize[0] * physics.SCALE;
+                float h = physics.winZoneSize[1] * physics.SCALE;
+                float pulse = (std::sin(globalTime * 3.0f) + 1.0f) * 0.5f; 
+                float alpha = 50.0f + pulse * 100.0f;
+                zoneRect.setSize(sf::Vector2f(w, h));
+                zoneRect.setOrigin(w/2.0f, h/2.0f);
+                zoneRect.setPosition(pos.x * physics.SCALE, pos.y * physics.SCALE);
+                zoneRect.setFillColor(sf::Color(255, 215, 0, (sf::Uint8)alpha)); 
+                zoneRect.setOutlineColor(sf::Color::Yellow);
+                zoneRect.setOutlineThickness(3.0f);
+                gameBuffer.draw(zoneRect); // DIBUJAMOS AL BUFFER
             }
-            window.draw(va);
         }
 
-        const auto& currentStatuses = physics.getRacerStatus(); // Asegurate de tener esto a mano
+        const auto& statuses = physics.getRacerStatus();
+        float tombSize = 25.0f; 
+
+        for (size_t i = 0; i < statuses.size(); ++i) {
+            const auto& status = statuses[i];
+
+            if (!status.isAlive) {
+                float px = status.deathPos.x * physics.SCALE;
+                float py = status.deathPos.y * physics.SCALE;
+
+                sf::Color deathColor = (i < 4) ? racerColors[i] : sf::Color::White;
+
+                sf::RectangleShape grave;
+                grave.setSize(sf::Vector2f(tombSize, tombSize));
+                grave.setOrigin(tombSize / 2.0f, tombSize / 2.0f);
+                grave.setPosition(px, py);
+                grave.setFillColor(sf::Color(20, 20, 20, 240)); 
+                grave.setOutlineColor(deathColor);              
+                grave.setOutlineThickness(2.0f);
+                gameBuffer.draw(grave); // DIBUJAMOS AL BUFFER
+
+                float crossThick = 5.0f;               
+                float crossLen = tombSize * 0.8f;      
+
+                sf::RectangleShape bar1(sf::Vector2f(crossLen, crossThick));
+                sf::RectangleShape bar2(sf::Vector2f(crossLen, crossThick));
+
+                bar1.setOrigin(crossLen / 2.0f, crossThick / 2.0f);
+                bar2.setOrigin(crossLen / 2.0f, crossThick / 2.0f);
+
+                bar1.setPosition(px, py);
+                bar2.setPosition(px, py);
+
+                bar1.setRotation(45.0f);
+                bar2.setRotation(-45.0f);
+
+                bar1.setFillColor(deathColor); 
+                bar2.setFillColor(deathColor);
+
+                gameBuffer.draw(bar1); // DIBUJAMOS AL BUFFER
+                gameBuffer.draw(bar2);
+            }
+        }
+
+// --- RENDERIZADO DE ESTELAS MEJORADO ---
+        for (size_t i = 0; i < trails.size(); ++i) {
+            const auto& pts = trails[i].points;
+            if (pts.size() < 2) continue; // Necesitamos al menos 2 puntos para calcular normales
+
+            // Dos pasadas: un halo exterior (glow) y un núcleo brillante (core)
+            sf::VertexArray glowVA(sf::TriangleStrip, pts.size() * 2);
+            sf::VertexArray coreVA(sf::TriangleStrip, pts.size() * 2);
+            
+            // 1. Escala dinámica: atamos el grosor al tamaño del cuadrado en el motor físico
+            float baseWidth = physics.currentRacerSize * physics.SCALE; 
+
+            for (size_t j = 0; j < pts.size(); ++j) {
+                sf::Vector2f normal(1, 0);
+                
+                // 2. Cálculo de normal mejorado (evita que el último punto rompa la orientación)
+                if (j < pts.size() - 1) {
+                    sf::Vector2f dir = pts[j+1] - pts[j];
+                    float len = std::sqrt(dir.x*dir.x + dir.y*dir.y);
+                    if (len > 0.001f) normal = sf::Vector2f(-dir.y/len, dir.x/len);
+                } else if (j > 0) {
+                    sf::Vector2f dir = pts[j] - pts[j-1];
+                    float len = std::sqrt(dir.x*dir.x + dir.y*dir.y);
+                    if (len > 0.001f) normal = sf::Vector2f(-dir.y/len, dir.x/len);
+                }
+
+                // Porcentaje de vida del segmento (1.0 = pegado al racer, 0.0 = final de la cola)
+                float lifePct = 1.0f - ((float)j / (float)pts.size());
+                
+                // 3. Tapering curvo: usamos raíz para que el grosor no caiga en línea recta
+                float widthPct = std::pow(lifePct, 0.6f); 
+                float currentWidth = baseWidth * widthPct;
+                
+                sf::Color baseColor = trails[i].color;
+                
+                // --- CAPA EXTERIOR (GLOW) ---
+                sf::Color glowColor = baseColor;
+                // El alpha cae cuadráticamente para que se disipe suave en los bordes
+                glowColor.a = (sf::Uint8)(std::pow(lifePct, 1.5f) * 160.0f); 
+                
+                glowVA[j*2].position = pts[j] + normal * (currentWidth * 0.5f);
+                glowVA[j*2].color = glowColor;
+                glowVA[j*2+1].position = pts[j] - normal * (currentWidth * 0.5f);
+                glowVA[j*2+1].color = glowColor;
+
+                // --- CAPA INTERIOR (CORE) ---
+                sf::Color coreColor = sf::Color::White;
+                // Agregamos interpolación hacia blanco para quemar el color central
+                coreColor.r = (baseColor.r + 255 * 2) / 3;
+                coreColor.g = (baseColor.g + 255 * 2) / 3;
+                coreColor.b = (baseColor.b + 255 * 2) / 3;
+                coreColor.a = (sf::Uint8)(lifePct * 240.0f);
+                
+                // El núcleo luminoso ocupa solo el 35% del grosor de la estela
+                float coreWidth = currentWidth * 0.35f; 
+                
+                coreVA[j*2].position = pts[j] + normal * (coreWidth * 0.5f);
+                coreVA[j*2].color = coreColor;
+                coreVA[j*2+1].position = pts[j] - normal * (coreWidth * 0.5f);
+                coreVA[j*2+1].color = coreColor;
+            }
+            
+            // Dibujamos con mezcla alfa tradicional por encima del fondo
+            gameBuffer.draw(glowVA);
+            gameBuffer.draw(coreVA);
+        }
+
+        const auto& currentStatuses = physics.getRacerStatus(); 
 
         for (size_t i = 0; i < bodies.size(); ++i) {
             if (i < currentStatuses.size() && !currentStatuses[i].isAlive) continue;
@@ -601,10 +616,32 @@ for (size_t i = 0; i < statuses.size(); ++i) {
             else rect.setOutlineColor(sf::Color::White);
             rect.setFillColor(sf::Color::White);
             rect.setOutlineThickness(-3.0f);
-            window.draw(rect);
+            gameBuffer.draw(rect); // DIBUJAMOS AL BUFFER
         }
 
-        recorder.addFrame(window);
+        // Sellamos el frame gigante de 1080p
+        gameBuffer.display();
+
+        // Le mandamos el frame crudo de VRAM al grabador
+        recorder.addFrame(gameBuffer.getTexture());
+
+        // ==============================================
+        // --- DRAW: PASAR A LA VENTANA CHICA (PANTALLA) ---
+        // ==============================================
+        window.clear();
+
+        // Extraemos la textura completa y la convertimos a un Sprite
+        sf::Sprite renderSprite(gameBuffer.getTexture());
+        
+        // Escalar de RENDER (1080) a WINDOW (720)
+        float scaleX = (float)WINDOW_WIDTH / RENDER_WIDTH;
+        float scaleY = (float)WINDOW_HEIGHT / RENDER_HEIGHT;
+        renderSprite.setScale(scaleX, scaleY);
+        
+        // Dibujamos el "juego" comprimido en nuestra pantalla
+        window.draw(renderSprite);
+
+        // ImGui se dibuja ÚNICAMENTE acá, en la ventana del OS, por lo que NO SALE en el video!
         ImGui::SFML::Render(window);
         window.display();
     }

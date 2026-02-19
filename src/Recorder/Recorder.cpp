@@ -112,11 +112,12 @@ void Recorder::stop() {
     }
 }
 
-void Recorder::addFrame(const sf::Window& window) {
+void Recorder::addFrame(const sf::Texture& texture) {
     if (!ffmpegPipe || !isRecording) return;
     currentFrame++;
-    captureTexture.update(window);
-    sf::Image img = captureTexture.copyToImage();
+    
+    // Bajamos la textura de la VRAM a la RAM de una
+    sf::Image img = texture.copyToImage();
     const sf::Uint8* pixels = img.getPixelsPtr();
     fwrite(pixels, 1, width * height * 4, ffmpegPipe);
 }
