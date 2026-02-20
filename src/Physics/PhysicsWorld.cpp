@@ -262,9 +262,14 @@ void PhysicsWorld::saveMap(const std::string& filename) {
              << w.stopTargetIdx << " "
              << w.maxSize << " "
              // --- NUEVOS CAMPOS ---
+// --- NUEVOS CAMPOS ---
              << w.shapeType << " "
              << w.rotation << " "
-             << w.isDeadly << "\n";
+             << w.isDeadly << " "
+             << w.isMoving << " "
+             << w.pointA.x << " " << w.pointA.y << " "
+             << w.pointB.x << " " << w.pointB.y << " "
+             << w.moveSpeed << "\n";
     }
 
     for (size_t i = 0; i < dynamicBodies.size(); ++i) {
@@ -345,15 +350,23 @@ void PhysicsWorld::loadMap(const std::string& filename) {
                 if (ss >> rot) newWall.rotation = rot;
                 if (ss >> deadly) newWall.isDeadly = deadly;
 
-                // IMPORTANTÍSIMO:
-                // Como addCustomWall la creó default, ahora forzamos la actualización
-                // física para que Box2D cree el Triángulo y la rote de verdad.
+            bool isMov = false;
+                if (ss >> isMov) {
+                    newWall.isMoving = isMov;
+                    ss >> newWall.pointA.x >> newWall.pointA.y
+                       >> newWall.pointB.x >> newWall.pointB.y
+                       >> newWall.moveSpeed;
+                       
+                    if (newWall.isMoving) {
+                        newWall.body->SetType(b2_kinematicBody);
+                    }
+                }
+
                 updateCustomWall(customWalls.size() - 1, x, y, w, h, sid, sType, rot);
-                
-                // Restauramos el flag de deadly (updateCustomWall podría resetearlo)
                 customWalls.back().isDeadly = deadly;
             }
         }
+
         else if (type == "RACER") { 
             int id; float x, y, vx, vy, a, av;
             ss >> id >> x >> y >> vx >> vy >> a >> av;
@@ -676,6 +689,102 @@ void PhysicsWorld::updateWallExpansion(float dt) {
         fd.friction = 0.0f;
         fd.restitution = 1.0f;
         wall.body->CreateFixture(&fd);
+    }
+}
+
+void PhysicsWorld::updateMovingPlatforms(float dt) {
+    if (isPaused) return;
+
+    for (size_t i = 0; i < customWalls.size(); ++i) {
+        CustomWall& wall = customWalls[i];
+        if (!wall.isMoving) continue;
+
+        if (wall.body->GetType() != b2_kinematicBody) {
+            wall.body->SetType(b2_kinematicBody);
+        }
+
+        b2Vec2 currentPos = wall.body->GetPosition();
+        b2Vec2 targetPos = wall.movingTowardsB ? wall.pointB : wall.pointA;
+        
+        b2Vec2 dir = targetPos - currentPos;
+        float dist = dir.Length();
+        
+        bool shouldReverse = false;
+
+        // 1. Check si llegó al punto de destino
+        if (dist < 0.1f) {
+            shouldReverse = true;
+        } else {
+            dir.Normalize();
+            b2Vec2 vel = dir;
+            vel *= wall.moveSpeed;
+            
+            // 2. CHECK PREDICTIVO DE COLISIÓN (AABB)
+            if (wall.reverseOnContact) {
+                b2Vec2 nextPos = currentPos + vel * dt;
+                float myHalfW = wall.width / 2.0f;
+                float myHalfH = wall.height / 2.0f;
+                
+                for (size_t j = 0; j < customWalls.size(); ++j) {
+                    if (i == j) continue; // No chocarse a sí misma
+                    
+                    const CustomWall& other = customWalls[j];
+                    b2Vec2 otherPos = other.body->GetPosition();
+                    float otherHalfW = other.width / 2.0f;
+                    float otherHalfH = other.height / 2.0f;
+                    
+                    float dx = std::abs(nextPos.x - otherPos.x);
+                    float dy = std::abs(nextPos.y - otherPos.y);
+                    
+                    // Restamos 0.02f de margen para que pegue la vuelta justo antes de incrustarse
+                    if (dx < (myHalfW + otherHalfW - 0.02f) && dy < (myHalfH + otherHalfH - 0.02f)) {
+                        shouldReverse = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!shouldReverse) {
+                wall.body->SetLinearVelocity(vel);
+            }
+        }
+
+        // SI LLEGÓ AL DESTINO O CHOCÓ CON OTRA PARED
+        if (shouldReverse) {
+            wall.movingTowardsB = !wall.movingTowardsB;
+            
+            // Recalculamos la velocidad para el lado contrario al toque para no perder frames
+            b2Vec2 newTarget = wall.movingTowardsB ? wall.pointB : wall.pointA;
+            b2Vec2 newDir = newTarget - currentPos;
+            if (newDir.Length() > 0.0f) {
+                newDir.Normalize();
+                wall.body->SetLinearVelocity(newDir * wall.moveSpeed);
+            } else {
+                wall.body->SetLinearVelocity(b2Vec2(0.0f, 0.0f));
+            }
+
+            // --- FEEDBACK VISUAL Y SONORO ---
+            wall.flashTimer = 1.0f; // Hacemos que la pared brille
+            
+            if (soundManager) {
+                if (isSongLoaded && !songNotes.empty()) {
+                    int noteToPlay = songNotes[currentNoteIndex];
+                    currentNoteIndex = (currentNoteIndex + 1) % songNotes.size();
+                    soundManager->playMidiNote(noteToPlay);
+                    
+                    // Si está en modo canción, le cambiamos el color dinámicamente
+                    int colorIdx = (noteToPlay % 12) % getPalette().size();
+                    sf::Color neon = getPalette()[colorIdx];
+                    wall.flashColor = sf::Color(
+                        std::min(255, neon.r + 150),
+                        std::min(255, neon.g + 150),
+                        std::min(255, neon.b + 150)
+                    );
+                } else if (wall.soundID > 0) {
+                    soundManager->playSound(wall.soundID, 0, 0); // Modo normal
+                }
+            }
+        }
     }
 }
 

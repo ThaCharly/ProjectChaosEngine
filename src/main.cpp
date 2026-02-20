@@ -157,6 +157,7 @@ int main()
             while (accumulator >= timeStep) {
                 physics.step(timeStep, velIter, posIter);
                 physics.updateWallExpansion(dtSec);
+                physics.updateMovingPlatforms(timeStep);
                 accumulator -= timeStep;
             }
         } else {
@@ -360,8 +361,41 @@ int main()
                     ImGui::Unindent();
                 }
 
+                ImGui::Separator();
+                ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "MOVEMENT (KINEMATIC PLATFORM)");
+                
+                if (ImGui::Checkbox("Is Moving Platform", &w.isMoving)) {
+                    // Si lo acabamos de prender, seteamos unos valores lógicos por defecto
+                    if (w.isMoving) {
+                        w.pointA = w.body->GetPosition();
+                        w.pointB = w.pointA + b2Vec2(5.0f, 0.0f); // 5 metros a la derecha por defecto
+                        w.body->SetType(b2_kinematicBody);
+                    } else {
+                        w.body->SetType(b2_staticBody);
+                        w.body->SetLinearVelocity(b2Vec2(0.0f, 0.0f)); // Lo clavamos en el lugar
+                    }
+                }
+
+                if (w.isMoving) {
+                    ImGui::Indent();
+                    float pA[2] = { w.pointA.x, w.pointA.y };
+                    if (ImGui::DragFloat2("Point A", pA, 0.1f)) w.pointA.Set(pA[0], pA[1]);
+                    
+                    float pB[2] = { w.pointB.x, w.pointB.y };
+                    if (ImGui::DragFloat2("Point B", pB, 0.1f)) w.pointB.Set(pB[0], pB[1]);
+                    
+                    ImGui::DragFloat("Move Speed", &w.moveSpeed, 0.1f, 0.1f, 50.0f, "%.1f m/s");
+                    
+                    if (ImGui::Button("Set A to Current Pos", ImVec2(-1, 0))) w.pointA = w.body->GetPosition();
+                    if (ImGui::Button("Set B to Current Pos", ImVec2(-1, 0))) w.pointB = w.body->GetPosition();
+                    ImGui::Unindent();
+                }
+
                 if (ImGui::Button("DELETE WALL", ImVec2(-1, 20))) wallToDelete = i;
+
+                
             }
+            
             ImGui::PopID();
         }
         if (wallToDelete != -1) physics.removeCustomWall(wallToDelete);

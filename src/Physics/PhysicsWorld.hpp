@@ -31,6 +31,13 @@ struct CustomWall {
     int stopTargetIdx = -1;
     float maxSize = 0.0f;
     bool isDeadly = false;
+    
+    bool isMoving = false;
+    b2Vec2 pointA = {0.0f, 0.0f};
+    b2Vec2 pointB = {0.0f, 0.0f};
+    float moveSpeed = 3.0f;
+    bool movingTowardsB = true;
+    
 
     // --- NUEVO: GEOMETRÍA ---
     int shapeType = 0; // 0 = Box, 1 = Spike
@@ -113,6 +120,7 @@ public:
     float winZoneSize[2] = {2.0f, 2.0f};
 
     void updateWallExpansion(float dt);
+    void updateMovingPlatforms(float dt);
 
     void loadSong(const std::string& filename);
     bool isSongLoaded = false;
