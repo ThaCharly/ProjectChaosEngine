@@ -22,17 +22,21 @@ void ChaosContactListener::BeginContact(b2Contact* contact) {
 
     // Lógica de Paredes
     b2Body* dynamicBody = nullptr;
-    b2Body* staticBody = nullptr;
+    b2Body* wallBody = nullptr;
 
-    if (bodyA->GetType() == b2_dynamicBody && bodyB->GetType() == b2_staticBody) {
-        dynamicBody = bodyA; staticBody = bodyB;
-    } else if (bodyB->GetType() == b2_dynamicBody && bodyA->GetType() == b2_staticBody) {
-        dynamicBody = bodyB; staticBody = bodyA;
+    // Chequeamos si es una pared fija (static) o una plataforma móvil (kinematic)
+    bool isBWall = (bodyB->GetType() == b2_staticBody || bodyB->GetType() == b2_kinematicBody);
+    bool isAWall = (bodyA->GetType() == b2_staticBody || bodyA->GetType() == b2_kinematicBody);
+
+    if (bodyA->GetType() == b2_dynamicBody && isBWall) {
+        dynamicBody = bodyA; wallBody = bodyB;
+    } else if (bodyB->GetType() == b2_dynamicBody && isAWall) {
+        dynamicBody = bodyB; wallBody = bodyA;
     }
 
-    if (dynamicBody && staticBody) {
+    if (dynamicBody && wallBody) {
         bodiesToCheck.insert(dynamicBody);
-        wallsHit.insert(staticBody); // <--- Marcamos la pared golpeada
+        wallsHit.insert(wallBody); // <--- Marcamos la pared golpeada
     }
 }
 
