@@ -269,7 +269,9 @@ void PhysicsWorld::saveMap(const std::string& filename) {
              << w.isMoving << " "
              << w.pointA.x << " " << w.pointA.y << " "
              << w.pointB.x << " " << w.pointB.y << " "
-             << w.moveSpeed << "\n";
+             << w.moveSpeed << " "
+             << w.reverseOnContact << " "
+             << w.freeBounce << "\n";
     }
 
     for (size_t i = 0; i < dynamicBodies.size(); ++i) {
@@ -353,9 +355,15 @@ void PhysicsWorld::loadMap(const std::string& filename) {
             bool isMov = false;
                 if (ss >> isMov) {
                     newWall.isMoving = isMov;
-                    ss >> newWall.pointA.x >> newWall.pointA.y
+                   ss >> newWall.pointA.x >> newWall.pointA.y
                        >> newWall.pointB.x >> newWall.pointB.y
                        >> newWall.moveSpeed;
+                       
+                    bool isRev = false;
+                    if (ss >> isRev) newWall.reverseOnContact = isRev;
+                    
+                    bool isFree = false;
+                    if (ss >> isFree) newWall.freeBounce = isFree;
                        
                     if (newWall.isMoving) {
                         newWall.body->SetType(b2_kinematicBody);
@@ -704,87 +712,75 @@ void PhysicsWorld::updateMovingPlatforms(float dt) {
         }
 
         b2Vec2 currentPos = wall.body->GetPosition();
-        b2Vec2 targetPos = wall.movingTowardsB ? wall.pointB : wall.pointA;
-        
-        b2Vec2 dir = targetPos - currentPos;
-        float dist = dir.Length();
-        
-        bool shouldReverse = false;
+        b2Vec2 vel = wall.body->GetLinearVelocity();
 
-        // 1. Check si llegó al punto de destino
-        if (dist < 0.1f) {
-            shouldReverse = true;
-        } else {
-            dir.Normalize();
-            b2Vec2 vel = dir;
-            vel *= wall.moveSpeed;
-            
-            // 2. CHECK PREDICTIVO DE COLISIÓN (AABB)
-            if (wall.reverseOnContact) {
-                b2Vec2 nextPos = currentPos + vel * dt;
-                float myHalfW = wall.width / 2.0f;
-                float myHalfH = wall.height / 2.0f;
-                
-                for (size_t j = 0; j < customWalls.size(); ++j) {
-                    if (i == j) continue; // No chocarse a sí misma
-                    
-                    const CustomWall& other = customWalls[j];
-                    b2Vec2 otherPos = other.body->GetPosition();
-                    float otherHalfW = other.width / 2.0f;
-                    float otherHalfH = other.height / 2.0f;
-                    
-                    float dx = std::abs(nextPos.x - otherPos.x);
-                    float dy = std::abs(nextPos.y - otherPos.y);
-                    
-                    // Restamos 0.02f de margen para que pegue la vuelta justo antes de incrustarse
-                    if (dx < (myHalfW + otherHalfW - 0.02f) && dy < (myHalfH + otherHalfH - 0.02f)) {
-                        shouldReverse = true;
-                        break;
-                    }
-                }
-            }
-
-            if (!shouldReverse) {
-                wall.body->SetLinearVelocity(vel);
+        // Si está quieta (ej. recién creada), le damos el empujón inicial
+        if (vel.LengthSquared() < 0.01f && !wall.isFreeBouncing) {
+            b2Vec2 targetPos = wall.movingTowardsB ? wall.pointB : wall.pointA;
+            b2Vec2 dir = targetPos - currentPos;
+            if (dir.LengthSquared() > 0.0f) {
+                dir.Normalize();
+                vel = wall.moveSpeed * dir; // FIX: float * vector
             }
         }
 
-        // SI LLEGÓ AL DESTINO O CHOCÓ CON OTRA PARED
-        if (shouldReverse) {
-            wall.movingTowardsB = !wall.movingTowardsB;
+        bool hitTarget = false;
+        // Solo chequeamos si llegó a A o B si NO está en modo rebote libre
+        if (!wall.isFreeBouncing) {
+            b2Vec2 targetPos = wall.movingTowardsB ? wall.pointB : wall.pointA;
+            b2Vec2 dir = targetPos - currentPos;
+            if (dir.Length() < 0.1f) hitTarget = true;
+        }
+
+        bool hitWall = false;
+
+        // CHECK PREDICTIVO (AABB)
+        if (wall.reverseOnContact && !hitTarget) {
+            b2Vec2 nextPos = currentPos + (dt * vel); // FIX: float * vector
+            float myHalfW = wall.width / 2.0f;
+            float myHalfH = wall.height / 2.0f;
             
-            // Recalculamos la velocidad para el lado contrario al toque para no perder frames
+            for (size_t j = 0; j < customWalls.size(); ++j) {
+                if (i == j) continue; 
+                
+                const CustomWall& other = customWalls[j];
+                b2Vec2 otherPos = other.body->GetPosition();
+                float otherHalfW = other.width / 2.0f;
+                float otherHalfH = other.height / 2.0f;
+                
+                float dx = std::abs(nextPos.x - otherPos.x);
+                float dy = std::abs(nextPos.y - otherPos.y);
+                
+                if (dx < (myHalfW + otherHalfW - 0.02f) && dy < (myHalfH + otherHalfH - 0.02f)) {
+                    hitWall = true;
+                    break;
+                }
+            }
+        }
+
+        if (hitTarget) {
+            // Llegó a A o B de forma normal
+            wall.movingTowardsB = !wall.movingTowardsB;
             b2Vec2 newTarget = wall.movingTowardsB ? wall.pointB : wall.pointA;
             b2Vec2 newDir = newTarget - currentPos;
-            if (newDir.Length() > 0.0f) {
+            if (newDir.LengthSquared() > 0.0f) {
                 newDir.Normalize();
-                wall.body->SetLinearVelocity(newDir * wall.moveSpeed);
-            } else {
-                wall.body->SetLinearVelocity(b2Vec2(0.0f, 0.0f));
+                vel = wall.moveSpeed * newDir; 
             }
-
-            // --- FEEDBACK VISUAL Y SONORO ---
-            wall.flashTimer = 1.0f; // Hacemos que la pared brille
+        } else if (hitWall) {
+            // CHOCÓ CON OTRA PARED: Literalmente invertimos el vector de velocidad
+            vel = -1.0f * vel; 
             
-            if (soundManager) {
-                if (isSongLoaded && !songNotes.empty()) {
-                    int noteToPlay = songNotes[currentNoteIndex];
-                    currentNoteIndex = (currentNoteIndex + 1) % songNotes.size();
-                    soundManager->playMidiNote(noteToPlay);
-                    
-                    // Si está en modo canción, le cambiamos el color dinámicamente
-                    int colorIdx = (noteToPlay % 12) % getPalette().size();
-                    sf::Color neon = getPalette()[colorIdx];
-                    wall.flashColor = sf::Color(
-                        std::min(255, neon.r + 150),
-                        std::min(255, neon.g + 150),
-                        std::min(255, neon.b + 150)
-                    );
-                } else if (wall.soundID > 0) {
-                    soundManager->playSound(wall.soundID, 0, 0); // Modo normal
-                }
+            if (wall.freeBounce) {
+                // Si la opción está prendida, cortamos amarras con A y B
+                wall.isFreeBouncing = true; 
+            } else {
+                // Si no, formalmente cambia de objetivo (para que no se tranque)
+                wall.movingTowardsB = !wall.movingTowardsB;
             }
         }
+
+        wall.body->SetLinearVelocity(vel);
     }
 }
 

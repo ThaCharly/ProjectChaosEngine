@@ -37,6 +37,9 @@ struct CustomWall {
     b2Vec2 pointB = {0.0f, 0.0f};
     float moveSpeed = 3.0f;
     bool movingTowardsB = true;
+    bool reverseOnContact = false; 
+    bool freeBounce = false;     // <--- OPCIÓN DE USUARIO: Ignora A/B al chocar
+    bool isFreeBouncing = false;
     
 
     // --- NUEVO: GEOMETRÍA ---

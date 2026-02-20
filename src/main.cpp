@@ -388,8 +388,27 @@ int main()
                     
                     if (ImGui::Button("Set A to Current Pos", ImVec2(-1, 0))) w.pointA = w.body->GetPosition();
                     if (ImGui::Button("Set B to Current Pos", ImVec2(-1, 0))) w.pointB = w.body->GetPosition();
-                    ImGui::Unindent();
+
+                    ImGui::Spacing();
+                    ImGui::Checkbox("Reverse on Wall Contact", &w.reverseOnContact);
+                    
+                    if (w.reverseOnContact) {
+                        ImGui::Indent();
+                        ImGui::Checkbox("Ignore A/B after impact", &w.freeBounce);
+                        
+                        // Si ya está rebotando loca, te dejo un botón para resetearle la mente
+                        if (w.isFreeBouncing) {
+                            ImGui::SameLine();
+                            if (ImGui::Button("Reset Route")) {
+                                w.isFreeBouncing = false;
+                                // La forzamos a recalcular
+                                w.body->SetLinearVelocity(b2Vec2(0.0f, 0.0f)); 
+                            }
+                        }
+                        ImGui::Unindent();
+                    }
                 }
+            
 
                 if (ImGui::Button("DELETE WALL", ImVec2(-1, 20))) wallToDelete = i;
 
