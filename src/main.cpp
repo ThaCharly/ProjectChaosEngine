@@ -429,6 +429,8 @@ int main()
         ImGui::Separator();
         ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "GLOBAL PHYSICS");
         ImGui::Checkbox("Gravity", &physics.enableGravity);
+        ImGui::Checkbox("Stop on First Win", &physics.stopOnFirstWin);
+        ImGui::DragFloat("Finish Delay (s)", &physics.finishDelay, 0.05f, 0.0f, 2.0f); // <--- ACÁ
         ImGui::Checkbox("Chaos", &physics.enableChaos);
         if (physics.enableChaos) {
             ImGui::SliderFloat("Chaos %", &physics.chaosChance, 0.0f, 0.5f);

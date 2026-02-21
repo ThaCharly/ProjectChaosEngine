@@ -11,6 +11,9 @@
 
 struct RacerStatus {
     bool isAlive = true;
+    bool hasFinished = false; // <--- NUEVO
+    bool isFinishing = false; // <--- ESTADO NUEVO: Cruzando la meta
+    float finishTimer = 0.0f; // <--- CRONÓMETRO
     b2Vec2 deathPos = {0, 0};
 };
 
@@ -58,7 +61,7 @@ public:
     std::set<b2Body*> bodiesToCheck;
     std::set<b2Body*> wallsHit;
     b2Body* winZoneBody = nullptr;
-    b2Body* winnerBody = nullptr;
+    std::set<b2Body*> bodiesReachedWinZone;
     
     SoundManager* soundManager = nullptr;
     float worldWidth = 10.0f; 
@@ -110,6 +113,8 @@ public:
     float targetSpeed = 8.0f;
     bool enforceSpeed = true;
     bool enableGravity = false;
+    bool stopOnFirstWin = true; // <--- OPCIÓN DE USUARIO
+    float finishDelay = 0.25f; // Segundos extra que corre después de tocar la meta
     bool isPaused = false;
 
     bool enableChaos = false;

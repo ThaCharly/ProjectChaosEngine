@@ -11,8 +11,8 @@ void ChaosContactListener::BeginContact(b2Contact* contact) {
     b2Body* bodyB = fb->GetBody();
 
     if (winZoneBody) {
-        if (bodyA == winZoneBody && bodyB->GetType() == b2_dynamicBody) winnerBody = bodyB;
-        else if (bodyB == winZoneBody && bodyA->GetType() == b2_dynamicBody) winnerBody = bodyA;
+        if (bodyA == winZoneBody && bodyB->GetType() == b2_dynamicBody) bodiesReachedWinZone.insert(bodyB);
+        else if (bodyB == winZoneBody && bodyA->GetType() == b2_dynamicBody) bodiesReachedWinZone.insert(bodyA);
     }
 
     if (fa->GetBody()->GetType() == b2_dynamicBody && fb->GetBody()->GetType() == b2_dynamicBody) {
@@ -71,7 +71,7 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
     world.SetGravity(enableGravity ? b2Vec2(0.0f, 9.8f) : b2Vec2(0.0f, 0.0f));
     
     contactListener.bodiesToCheck.clear();
-    contactListener.winnerBody = nullptr;
+    //contactListener.winnerBody = nullptr;
 
     // 1. Dejar que Box2D calcule rebotes y resuelva colisiones
     world.Step(timeStep, velIter, posIter);
@@ -106,17 +106,68 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
         }
     }
 
-    // --- CHECK VICTORIA (Igual) ---
-    if (contactListener.winnerBody != nullptr) {
-        gameOver = true;
-        for (int i = 0; i < dynamicBodies.size(); ++i) {
-            if (dynamicBodies[i] == contactListener.winnerBody) {
-                winnerIndex = i;
+// --- CHECK VICTORIA (CON DELAY) ---
+    // 1. Detectar quién acaba de tocar la meta
+    for (b2Body* winnerBody : contactListener.bodiesReachedWinZone) {
+        int wIndex = -1;
+        for (size_t i = 0; i < dynamicBodies.size(); ++i) {
+            if (dynamicBodies[i] == winnerBody) {
+                wIndex = i; break;
+            }
+        }
+
+        // Si tocó la meta, está vivo, no terminó, y NO estaba ya cruzando...
+        if (wIndex != -1 && !racerStatus[wIndex].hasFinished && !racerStatus[wIndex].isFinishing && racerStatus[wIndex].isAlive) {
+            
+            racerStatus[wIndex].isFinishing = true; // Empieza a cruzar
+            racerStatus[wIndex].finishTimer = 0.0f;
+            
+            // Anotamos al ganador original (el primerísimo en TOCAR la meta)
+            if (winnerIndex == -1) {
+                winnerIndex = wIndex; 
+            }
+        }
+    }
+    contactListener.bodiesReachedWinZone.clear();
+
+    // 2. Procesar el tiempo de delay (para los que están cruzando)
+    for (size_t i = 0; i < dynamicBodies.size(); ++i) {
+        if (racerStatus[i].isFinishing && !racerStatus[i].hasFinished) {
+            racerStatus[i].finishTimer += timeStep;
+            
+            // Si ya pasó el medio segundito (o lo que configures)...
+            if (racerStatus[i].finishTimer >= finishDelay) {
+                racerStatus[i].hasFinished = true;
+                dynamicBodies[i]->SetEnabled(false); // AHORA SÍ lo congelamos
+                
+                // Si el juego frena con el primero, Y este es el ganador original, cortamos todo.
+                if (stopOnFirstWin && winnerIndex == (int)i) {
+                    gameOver = true;
+                    isPaused = true; 
+                    std::cout << ">>> VICTORY: RACER " << winnerIndex << " <<<" << std::endl;
+                    return;
+                }
+            }
+        }
+    }
+
+    // 3. Si NO frena con el primero, revisamos si ya terminaron todos
+    if (!stopOnFirstWin) {
+        bool activeRacersLeft = false;
+        for (size_t i = 0; i < dynamicBodies.size(); ++i) {
+            // Sigue corriendo si está vivo y todavía no superó el delay final
+            if (racerStatus[i].isAlive && !racerStatus[i].hasFinished) {
+                activeRacersLeft = true;
                 break;
             }
         }
-        std::cout << ">>> VICTORY: RACER " << winnerIndex << " <<<" << std::endl;
-        return; 
+
+        if (!activeRacersLeft) {
+            gameOver = true;
+            isPaused = true;
+            std::cout << ">>> RACE FINISHED (No active racers left) <<<" << std::endl;
+            return;
+        }
     }
 
     // --- CHAOS MODE (Igual) ---
@@ -245,7 +296,7 @@ void PhysicsWorld::saveMap(const std::string& filename) {
     if (!file.is_open()) return;
 
     file << "CONFIG " << targetSpeed << " " << currentRacerSize << " " 
-         << currentRestitution << " " << enableChaos << "\n";
+         << currentRestitution << " " << enableChaos << " " << stopOnFirstWin << "\n";
     file << "WINZONE " << winZonePos[0] << " " << winZonePos[1] << " " 
          << winZoneSize[0] << " " << winZoneSize[1] << "\n";
 
@@ -314,6 +365,10 @@ void PhysicsWorld::loadMap(const std::string& filename) {
             ss >> spd >> size >> rest >> chaos;
             targetSpeed = spd; enableChaos = chaos;
             updateRacerSize(size); updateRestitution(rest);
+            
+            bool stopFW;
+            if (ss >> stopFW) stopOnFirstWin = stopFW;
+            else stopOnFirstWin = true; // Retrocompatibilidad
         }
         else if (type == "WINZONE") {             
             float x, y, w, h;
@@ -799,8 +854,11 @@ void PhysicsWorld::updateFixedRotation(bool fixed) { currentFixedRotation=fixed;
 const std::vector<b2Body*>& PhysicsWorld::getDynamicBodies() const { return dynamicBodies; }
 void PhysicsWorld::resetRacers() { 
     // --- REVIVIR A TODOS ---
-    for(auto& status : racerStatus) {
+for(auto& status : racerStatus) {
         status.isAlive = true;
+        status.hasFinished = false;
+        status.isFinishing = false; // <---
+        status.finishTimer = 0.0f;  // <---
     }
 
     int i = 0; 
@@ -861,7 +919,7 @@ void PhysicsWorld::createRacers() {
     
     // --- INICIALIZAR ESTADO DE VIDA ---
     racerStatus.clear();
-    racerStatus.resize(dynamicBodies.size(), {true, {0,0}});
+    racerStatus.resize(dynamicBodies.size(), {true, false, false, 0.0f, {0,0}});
 }
 
 void PhysicsWorld::loadSong(const std::string& filename) {
