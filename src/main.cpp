@@ -19,12 +19,12 @@ struct Trail {
     sf::Color color;
 };
 
-    sf::Texture createGridTexture(int width, int height) {
+sf::Texture createGridTexture(int width, int height) {
     sf::RenderTexture rt;
     rt.create(width, height);
     rt.clear(sf::Color(30, 30, 30)); 
     sf::RectangleShape line;
-    line.setFillColor(sf::Color(10, 10, 10)); //30,30,30 aca y 10,10,10 en clear para negro con lineas blancas
+    line.setFillColor(sf::Color(10, 10, 10)); 
     line.setSize(sf::Vector2f(2.0f, (float)height));
     for (int x = 0; x < width; x += 60) { 
         line.setPosition((float)x, 0.0f); rt.draw(line);
@@ -54,26 +54,23 @@ void SoundManager::sendToRecorder(const sf::Int16* samples, std::size_t count, f
     }
 }
 
+// --- MÁQUINA DE ESTADOS PARA LA UI ESTILO UNITY ---
+enum class EntityType { None, Global, WinZone, Racers, Wall };
+
 int main()
 {
-    // --- RESOLUCIÓN OFF-SCREEN (VIDEO FINAL) ---
     const unsigned int RENDER_WIDTH = 1080;
     const unsigned int RENDER_HEIGHT = 1080;
-
-    // --- RESOLUCIÓN DE LA VENTANA (TU MONITOR) ---
     const unsigned int WINDOW_WIDTH = 720;
     const unsigned int WINDOW_HEIGHT = 720;
-    
     const unsigned int FPS = 60;
     const std::string VIDEO_DIRECTORY = "../output/video.mp4";
 
-    // Ventana bloqueada para que no la redimensionen y rompan el aspect ratio
     sf::RenderWindow window(sf::VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), "ChaosEngine - Neon Lab", sf::Style::Titlebar | sf::Style::Close);
     window.setFramerateLimit(FPS);
 
     if (!ImGui::SFML::Init(window)) return -1;
 
-    // --- FRAMEBUFFER GIGANTE ---
     sf::RenderTexture gameBuffer;
     if (!gameBuffer.create(RENDER_WIDTH, RENDER_HEIGHT)) {
         std::cerr << "Pah, te quedaste sin VRAM bo. Falló el RenderTexture." << std::endl;
@@ -81,8 +78,6 @@ int main()
     }
 
     SoundManager soundManager; 
-
-    // OJO ACÁ: La física labura con el tamaño de renderizado gigante
     PhysicsWorld physics(RENDER_WIDTH, RENDER_HEIGHT, &soundManager);
     physics.isPaused = true; 
     const auto& bodies = physics.getDynamicBodies();
@@ -91,10 +86,8 @@ int main()
     fs::path outputDir = videoPath.parent_path();
     if (!fs::exists(outputDir)) fs::create_directories(outputDir);
 
-    // El grabador también labura con el tamaño gigante
     Recorder recorder(RENDER_WIDTH, RENDER_HEIGHT, FPS, VIDEO_DIRECTORY);
     recorder.isRecording = false; 
-
     soundManager.setRecorder(&recorder);
 
     const float timeStep = 1.0f / 60.0f;
@@ -111,14 +104,12 @@ int main()
     const float VICTORY_DELAY = 0.5f; 
 
     const char* racerNames[] = { "Cyan", "Magenta", "Green", "Yellow" };
-    
     sf::Color racerColors[] = {
         sf::Color(0, 255, 255),   
         sf::Color(255, 0, 255),   
         sf::Color(57, 255, 20),   
         sf::Color(255, 215, 0)    
     };
-
     ImVec4 guiColors[] = {
         ImVec4(0, 1, 1, 1),   
         ImVec4(1, 0, 1, 1),   
@@ -126,7 +117,6 @@ int main()
         ImVec4(1, 0.8f, 0, 1)    
     };
 
-    // La grilla tiene que cubrir el mapa de 1080p entero
     sf::Texture gridTexture = createGridTexture(RENDER_WIDTH, RENDER_HEIGHT);
     sf::Sprite background(gridTexture);
 
@@ -134,6 +124,11 @@ int main()
     for(int i=0; i<4; ++i) trails[i].color = racerColors[i];
 
     static char mapFilename[128] = "../levels/level_01.txt";
+    static char songFile[128] = "song.txt";
+
+    // Variables de estado de la Interfaz
+    EntityType selectedType = EntityType::None;
+    int selectedIndex = -1;
 
     while (window.isOpen()) {
 
@@ -189,83 +184,167 @@ int main()
             }
         }
 
-        // --- IMGUI DIRECTOR ---
+        // ==============================================
+        // --- UI ESTILO UNITY/UE5 ---
+        // ==============================================
+
+        // 1. TOOLBAR (Panel Superior)
         ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(350, 750), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Director Control", nullptr);
+        ImGui::SetNextWindowSize(ImVec2(700, 60), ImGuiCond_FirstUseEver);
+        ImGui::Begin("Toolbar", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoMove);
 
-        static char songFile[128] = "song.txt";
-        ImGui::InputText("Song File", songFile, 128);
-        if (ImGui::Button("LOAD SONG")) {
-            physics.loadSong(songFile);
-        }
-
-        ImGui::TextColored(ImVec4(1, 0.2f, 0.2f, 1), "CAMERA & ACTION");
         if (recorder.isRecording) {
             ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor::HSV(0.0f, 0.6f, 0.6f));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor::HSV(0.0f, 0.7f, 0.7f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, (ImVec4)ImColor::HSV(0.0f, 0.8f, 0.8f));
-            if (ImGui::Button("STOP REC", ImVec2(-1, 40))) recorder.isRecording = false;
+            if (ImGui::Button("STOP REC", ImVec2(100, 40))) recorder.isRecording = false;
             ImGui::PopStyleColor(3);
         } else {
             ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor::HSV(0.33f, 0.6f, 0.6f));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor::HSV(0.33f, 0.7f, 0.7f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, (ImVec4)ImColor::HSV(0.33f, 0.8f, 0.8f));
-            if (ImGui::Button("START REC", ImVec2(-1, 40))) recorder.isRecording = true;
+            if (ImGui::Button("START REC", ImVec2(100, 40))) recorder.isRecording = true;
             ImGui::PopStyleColor(3);
         }
 
-        ImGui::Spacing();
+        ImGui::SameLine();
+        ImGui::SetCursorPosY(15);
         if (physics.isPaused) {
-            if (ImGui::Button("RESUME PHYS", ImVec2(-1, 30))) physics.isPaused = false;
+            if (ImGui::Button("RESUME PHYS", ImVec2(100, 30))) physics.isPaused = false;
         } else {
-            if (ImGui::Button("PAUSE PHYS", ImVec2(-1, 30))) physics.isPaused = true;
+            if (ImGui::Button("PAUSE PHYS", ImVec2(100, 30))) physics.isPaused = true;
         }
-        if (ImGui::Button("RESET RACE", ImVec2(-1, 20))) {
+
+        ImGui::SameLine();
+        ImGui::SetCursorPosY(15);
+        if (ImGui::Button("RESET RACE", ImVec2(100, 30))) {
             physics.resetRacers();
             for(auto& t : trails) t.points.clear();
             victoryTimer = 0.0f; 
             victorySequenceStarted = false; 
         }
 
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, 1), "MAP SYSTEM");
-        ImGui::InputText("Filename", mapFilename, IM_ARRAYSIZE(mapFilename));
-        if (ImGui::Button("SAVE MAP", ImVec2(100, 30))) physics.saveMap(mapFilename);
         ImGui::SameLine();
-        if (ImGui::Button("LOAD MAP", ImVec2(100, 30))) {
-            physics.loadMap(mapFilename);
-            for(auto& t : trails) t.points.clear();
+        ImGui::SetCursorPosY(15);
+        ImGui::SetNextItemWidth(120);
+        ImGui::InputText("##SongFile", songFile, 128);
+        ImGui::SameLine();
+        if (ImGui::Button("LOAD SONG", ImVec2(90, 30))) {
+            physics.loadSong(songFile);
         }
+
+        ImGui::End();
+
+        // 2. HIERARCHY (Panel Izquierdo)
+        ImGui::SetNextWindowPos(ImVec2(10, 80), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(200, 630), ImGuiCond_FirstUseEver);
+        ImGui::Begin("Hierarchy", nullptr, ImGuiWindowFlags_NoMove);
+
+        ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, 1), "SCENE");
+        if (ImGui::Selectable("Global Settings", selectedType == EntityType::Global)) selectedType = EntityType::Global;
+        if (ImGui::Selectable("Win Zone", selectedType == EntityType::WinZone)) selectedType = EntityType::WinZone;
+        if (ImGui::Selectable("Racers Fleet", selectedType == EntityType::Racers)) selectedType = EntityType::Racers;
 
         ImGui::Separator();
-        ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "WALL BUILDER");
-        
-        static int nextWallSoundID = 1;
-        const char* noteNames[] = { "Mute", "Do (C4)", "Re (D4)", "Mi (E4)", "Fa (F4)", "Sol (G4)", "La (A4)", "Si (B4)", "Do (C5)" };
-        if (nextWallSoundID >= 0 && nextWallSoundID <= 8) {
-            ImGui::Text("Next Sound: %s", noteNames[nextWallSoundID]);
-        }
-        ImGui::SliderInt("Next Sound ID", &nextWallSoundID, 0, 8);
-
-        if (ImGui::Button("ADD WALL", ImVec2(-1, 30))) {
-            physics.addCustomWall(12.0f, 20.0f, 10.0f, 1.0f, nextWallSoundID);
+        ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "WALLS");
+        ImGui::SameLine(ImGui::GetWindowWidth() - 35);
+        if (ImGui::Button("+", ImVec2(25, 20))) {
+            physics.addCustomWall(12.0f, 20.0f, 10.0f, 1.0f, 1);
+            selectedType = EntityType::Wall;
+            selectedIndex = (int)physics.getCustomWalls().size() - 1;
         }
 
-        ImGui::Spacing();
-        ImGui::Text("Custom Walls List:");
         const auto& walls = physics.getCustomWalls();
+        for (int i = 0; i < (int)walls.size(); ++i) {
+            std::string label = "Wall " + std::to_string(i);
+            if (walls[i].soundID > 0) label += " [♪]";
+            if (walls[i].isExpandable) label += " [E]";
+            if (walls[i].isMoving) label += " [M]";
+            if (walls[i].shapeType == 1) label += " [Spike]";
+
+            if (ImGui::Selectable(label.c_str(), selectedType == EntityType::Wall && selectedIndex == i)) {
+                selectedType = EntityType::Wall;
+                selectedIndex = i;
+            }
+        }
+        ImGui::End();
+
+        // 3. INSPECTOR (Panel Derecho)
+        ImGui::SetNextWindowPos(ImVec2(470, 80), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(240, 630), ImGuiCond_FirstUseEver);
+        ImGui::Begin("Inspector", nullptr, ImGuiWindowFlags_NoMove);
+
         int wallToDelete = -1;
         int wallToDuplicate = -1;
 
-        for (int i = 0; i < walls.size(); ++i) {
-            ImGui::PushID(i);
-            std::string label = "Wall " + std::to_string(i);
-            if (walls[i].soundID > 0) label += " [Note " + std::to_string(walls[i].soundID) + "]";
-            if (walls[i].isExpandable) label += " [EXP]"; 
+        if (selectedType == EntityType::None) {
+            ImGui::TextDisabled("Select an object\nin the Hierarchy.");
+        } 
+        else if (selectedType == EntityType::Global) {
+            ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, 1), "MAP SYSTEM");
+            ImGui::SetNextItemWidth(-1);
+            ImGui::InputText("##Filename", mapFilename, IM_ARRAYSIZE(mapFilename));
+            if (ImGui::Button("SAVE MAP", ImVec2(-1, 30))) physics.saveMap(mapFilename);
+            if (ImGui::Button("LOAD MAP", ImVec2(-1, 30))) {
+                physics.loadMap(mapFilename);
+                for(auto& t : trails) t.points.clear();
+                selectedType = EntityType::None; // Reset selection safety
+            }
 
-            if (ImGui::CollapsingHeader(label.c_str())) {
-                CustomWall& w = physics.getCustomWalls()[i]; 
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "GLOBAL PHYSICS");
+            ImGui::Checkbox("Gravity", &physics.enableGravity);
+            ImGui::Checkbox("Stop on First Win", &physics.stopOnFirstWin);
+            ImGui::DragFloat("Finish Delay (s)", &physics.finishDelay, 0.05f, 0.0f, 2.0f);
+            
+            ImGui::Checkbox("Chaos Mode", &physics.enableChaos);
+            if (physics.enableChaos) {
+                ImGui::Indent();
+                ImGui::SliderFloat("Chaos %", &physics.chaosChance, 0.0f, 0.5f);
+                ImGui::SliderFloat("Boost", &physics.chaosBoost, 1.0f, 3.0f);
+                ImGui::Unindent();
+            }
+        }
+        else if (selectedType == EntityType::WinZone) {
+            ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), "WIN ZONE CONFIG");
+            bool updateZone = false;
+            updateZone |= ImGui::DragFloat2("Pos", physics.winZonePos, 0.1f);
+            updateZone |= ImGui::DragFloat2("Size", physics.winZoneSize, 0.1f);
+            if (updateZone) physics.updateWinZone(physics.winZonePos[0], physics.winZonePos[1], physics.winZoneSize[0], physics.winZoneSize[1]);
+        }
+        else if (selectedType == EntityType::Racers) {
+            ImGui::TextColored(ImVec4(0.5f, 0.5f, 1.0f, 1), "FLEET SETTINGS");
+            float size = physics.currentRacerSize;
+            if (ImGui::DragFloat("Size", &size, 0.05f, 0.1f, 10.0f)) physics.updateRacerSize(size);
+            float rest = physics.currentRestitution;
+            if (ImGui::DragFloat("Bounce", &rest, 0.01f, 0.0f, 2.0f)) physics.updateRestitution(rest);
+            bool fixedRot = physics.currentFixedRotation;
+            if (ImGui::Checkbox("Fixed Rotation", &fixedRot)) physics.updateFixedRotation(fixedRot);
+            ImGui::Checkbox("Enforce Speed", &physics.enforceSpeed);
+            ImGui::DragFloat("Target Vel", &physics.targetSpeed, 0.5f, 0.0f, 100.0f);
+
+            ImGui::Separator();
+            ImGui::Text("INDIVIDUAL RACERS");
+            for (size_t i = 0; i < bodies.size(); ++i) {
+                b2Body* b = bodies[i];
+                ImGui::PushStyleColor(ImGuiCol_Header, guiColors[i % 4]);
+                ImGui::PushID((int)i);
+                std::string headerName = (i < 4) ? std::string(racerNames[i]) : "Racer " + std::to_string(i);
+                if (ImGui::CollapsingHeader(headerName.c_str())) {
+                    b2Vec2 pos = b->GetPosition(); float p[2] = { pos.x, pos.y };
+                    if (ImGui::DragFloat2("Pos", p, 0.1f)) { b->SetTransform(b2Vec2(p[0], p[1]), b->GetAngle()); b->SetAwake(true); }
+                    b2Vec2 vel = b->GetLinearVelocity(); float v[2] = { vel.x, vel.y };
+                    if (ImGui::DragFloat2("Vel", v, 0.1f)) { b->SetLinearVelocity(b2Vec2(v[0], v[1])); b->SetAwake(true); }
+                }
+                ImGui::PopStyleColor();
+                ImGui::PopID();
+            }
+        }
+        else if (selectedType == EntityType::Wall) {
+            if (selectedIndex >= 0 && selectedIndex < physics.getCustomWalls().size()) {
+                CustomWall& w = physics.getCustomWalls()[selectedIndex];
+                
+                ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "WALL %d", selectedIndex);
                 
                 float pos[2] = { w.body->GetPosition().x, w.body->GetPosition().y };
                 float size[2] = { w.width, w.height };
@@ -276,20 +355,12 @@ int main()
                 changed |= ImGui::DragFloat2("Size", size, 0.1f, 0.5f, 30.0f);
                 changed |= ImGui::SliderInt("Sound ID", &snd, 0, 8);
                 
-                if (changed) physics.updateCustomWall(i, pos[0], pos[1], size[0], size[1], snd, w.shapeType, w.rotation);
-
-                ImGui::Separator();
-                ImGui::Text("Appearance");
-
-                if (ImGui::Button("ADD SPIKE (1m)", ImVec2(-1, 30))) {
-                    physics.addCustomWall(12.0f, 12.0f, 1.0f, 1.0f, 0, 1, 0.0f);
-                }
-
-                int sType = w.shapeType;
-                float rotDeg = w.rotation * 180.0f / 3.14159f; 
+                if (changed) physics.updateCustomWall(selectedIndex, pos[0], pos[1], size[0], size[1], snd, w.shapeType, w.rotation);
 
                 ImGui::Separator();
                 ImGui::Text("Geometry");
+                int sType = w.shapeType;
+                float rotDeg = w.rotation * 180.0f / 3.14159f; 
                 bool geoChanged = false;
 
                 if (ImGui::RadioButton("Box", sType == 0)) { sType = 0; geoChanged = true; } ImGui::SameLine();
@@ -304,9 +375,11 @@ int main()
 
                 if (geoChanged || changed) { 
                     float rotRad = rotDeg * 3.14159f / 180.0f;
-                    physics.updateCustomWall(i, pos[0], pos[1], size[0], size[1], snd, sType, rotRad);
+                    physics.updateCustomWall(selectedIndex, pos[0], pos[1], size[0], size[1], snd, sType, rotRad);
                 }
 
+                ImGui::Separator();
+                ImGui::Text("Appearance");
                 sf::Color c = w.neonColor;
                 ImVec4 imColor = ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, 1.0f);
 
@@ -314,171 +387,103 @@ int main()
                 ImGui::SameLine();
 
                 int currentColorIdx = w.colorIndex;
-                const char* colorNames[] = { 
-                    "Cyan (Tron)", "Magenta (Synth)", "Toxic Lime", "Electric Orange", 
-                    "Plasma Purple", "Hot Red", "Gold", "Deep Blue", "Hot Pink" 
-                };
-                
-                if (ImGui::Combo("Neon Color", &currentColorIdx, colorNames, IM_ARRAYSIZE(colorNames))) {
-                    physics.updateWallColor(i, currentColorIdx);
+                const char* colorNames[] = { "Cyan", "Magenta", "Lime", "Orange", "Purple", "Red", "Gold", "Blue", "Pink" };
+                ImGui::SetNextItemWidth(-1);
+                if (ImGui::Combo("##Color", &currentColorIdx, colorNames, IM_ARRAYSIZE(colorNames))) {
+                    physics.updateWallColor(selectedIndex, currentColorIdx);
                 }
 
                 ImGui::Separator();
                 ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "DANGER ZONE"); 
-
                 if (ImGui::Checkbox("IS DEADLY (Spike)", &w.isDeadly)) {
-                    if (w.isDeadly) physics.updateWallColor(i, 5); 
+                    if (w.isDeadly) physics.updateWallColor(selectedIndex, 5); 
                 }
 
                 ImGui::Separator();
-                ImGui::TextColored(ImVec4(0.8f, 0.4f, 1.0f, 1.0f), "EXPANSION PROPERTIES");
-                
-                ImGui::Checkbox("Is Expandable", &w.isExpandable);
-
-                if (w.isExpandable) {
-                    ImGui::Indent();
-                    ImGui::DragFloat("Start Delay (s)", &w.expansionDelay, 0.1f, 0.0f, 60.0f);
-                    ImGui::DragFloat("Growth Speed (m/s)", &w.expansionSpeed, 0.05f, 0.01f, 10.0f);
-                    
-                    ImGui::Text("Growth Axis:"); 
-                    ImGui::SameLine();
-                    ImGui::RadioButton("X", &w.expansionAxis, 0); ImGui::SameLine();
-                    ImGui::RadioButton("Y", &w.expansionAxis, 1); ImGui::SameLine();
-                    ImGui::RadioButton("XY", &w.expansionAxis, 2);
-
-                    ImGui::Separator();
-                    ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "STOP CONDITIONS");
-                    
-                    ImGui::Checkbox("Stop on Contact", &w.stopOnContact);
-                    if (w.stopOnContact) {
+                if (ImGui::CollapsingHeader("Expansion Properties")) {
+                    ImGui::Checkbox("Is Expandable", &w.isExpandable);
+                    if (w.isExpandable) {
                         ImGui::Indent();
-                        ImGui::TextDisabled("(?) -1 = Any Wall");
-                        ImGui::InputInt("Target Wall ID", &w.stopTargetIdx);
+                        ImGui::DragFloat("Start Delay", &w.expansionDelay, 0.1f, 0.0f, 60.0f);
+                        ImGui::DragFloat("Speed", &w.expansionSpeed, 0.05f, 0.01f, 10.0f);
+                        ImGui::RadioButton("X", &w.expansionAxis, 0); ImGui::SameLine();
+                        ImGui::RadioButton("Y", &w.expansionAxis, 1); ImGui::SameLine();
+                        ImGui::RadioButton("XY", &w.expansionAxis, 2);
+                        ImGui::Checkbox("Stop on Contact", &w.stopOnContact);
+                        if (w.stopOnContact) ImGui::InputInt("Target Wall", &w.stopTargetIdx);
+                        ImGui::DragFloat("Max Size", &w.maxSize, 0.5f, 0.0f, 100.0f);
                         ImGui::Unindent();
                     }
-
-                    ImGui::DragFloat("Max Size Limit", &w.maxSize, 0.5f, 0.0f, 100.0f);
-                    ImGui::ProgressBar(w.timeAlive / (w.expansionDelay + 0.001f), ImVec2(-1, 10), "Timer");
-                    ImGui::Unindent();
                 }
 
-                ImGui::Separator();
-                ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "MOVEMENT (KINEMATIC PLATFORM)");
-                
-                if (ImGui::Checkbox("Is Moving Platform", &w.isMoving)) {
-                    // Si lo acabamos de prender, seteamos unos valores lógicos por defecto
-                    if (w.isMoving) {
-                        w.pointA = w.body->GetPosition();
-                        w.pointB = w.pointA + b2Vec2(5.0f, 0.0f); // 5 metros a la derecha por defecto
-                        w.body->SetType(b2_kinematicBody);
-                    } else {
-                        w.body->SetType(b2_staticBody);
-                        w.body->SetLinearVelocity(b2Vec2(0.0f, 0.0f)); // Lo clavamos en el lugar
+                if (ImGui::CollapsingHeader("Kinematic Movement")) {
+                    if (ImGui::Checkbox("Is Moving Platform", &w.isMoving)) {
+                        if (w.isMoving) {
+                            w.pointA = w.body->GetPosition();
+                            w.pointB = w.pointA + b2Vec2(5.0f, 0.0f);
+                            w.body->SetType(b2_kinematicBody);
+                        } else {
+                            w.body->SetType(b2_staticBody);
+                            w.body->SetLinearVelocity(b2Vec2(0.0f, 0.0f)); 
+                        }
                     }
-                }
 
-                if (w.isMoving) {
-                    ImGui::Indent();
-                    float pA[2] = { w.pointA.x, w.pointA.y };
-                    if (ImGui::DragFloat2("Point A", pA, 0.1f)) w.pointA.Set(pA[0], pA[1]);
-                    
-                    float pB[2] = { w.pointB.x, w.pointB.y };
-                    if (ImGui::DragFloat2("Point B", pB, 0.1f)) w.pointB.Set(pB[0], pB[1]);
-                    
-                    ImGui::DragFloat("Move Speed", &w.moveSpeed, 0.1f, 0.1f, 50.0f, "%.1f m/s");
-                    
-                    if (ImGui::Button("Set A to Current Pos", ImVec2(-1, 0))) w.pointA = w.body->GetPosition();
-                    if (ImGui::Button("Set B to Current Pos", ImVec2(-1, 0))) w.pointB = w.body->GetPosition();
-
-                    ImGui::Spacing();
-                    ImGui::Checkbox("Reverse on Wall Contact", &w.reverseOnContact);
-                    
-                    if (w.reverseOnContact) {
+                    if (w.isMoving) {
                         ImGui::Indent();
-                        ImGui::Checkbox("Ignore A/B after impact", &w.freeBounce);
+                        float pA[2] = { w.pointA.x, w.pointA.y };
+                        if (ImGui::DragFloat2("Point A", pA, 0.1f)) w.pointA.Set(pA[0], pA[1]);
                         
-                        // Si ya está rebotando loca, te dejo un botón para resetearle la mente
-                        if (w.isFreeBouncing) {
-                            ImGui::SameLine();
-                            if (ImGui::Button("Reset Route")) {
+                        float pB[2] = { w.pointB.x, w.pointB.y };
+                        if (ImGui::DragFloat2("Point B", pB, 0.1f)) w.pointB.Set(pB[0], pB[1]);
+                        
+                        ImGui::DragFloat("Speed", &w.moveSpeed, 0.1f, 0.1f, 50.0f);
+                        
+                        if (ImGui::Button("Set A = Current", ImVec2(-1, 0))) w.pointA = w.body->GetPosition();
+                        if (ImGui::Button("Set B = Current", ImVec2(-1, 0))) w.pointB = w.body->GetPosition();
+
+                        ImGui::Checkbox("Reverse on Wall", &w.reverseOnContact);
+                        if (w.reverseOnContact) {
+                            ImGui::Checkbox("Free Bounce", &w.freeBounce);
+                            if (w.isFreeBouncing && ImGui::Button("Reset Route")) {
                                 w.isFreeBouncing = false;
-                                // La forzamos a recalcular
                                 w.body->SetLinearVelocity(b2Vec2(0.0f, 0.0f)); 
                             }
                         }
                         ImGui::Unindent();
                     }
                 }
-            
-                if (ImGui::Button("DUPLICATE WALL", ImVec2(-1, 20))) wallToDuplicate = i;
-                if (ImGui::Button("DELETE WALL", ImVec2(-1, 20))) wallToDelete = i;
 
-                
+                ImGui::Separator();
+                ImGui::Spacing();
+                if (ImGui::Button("DUPLICATE", ImVec2(-1, 30))) wallToDuplicate = selectedIndex;
+                ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor::HSV(0.0f, 0.6f, 0.6f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor::HSV(0.0f, 0.7f, 0.7f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, (ImVec4)ImColor::HSV(0.0f, 0.8f, 0.8f));
+                if (ImGui::Button("DELETE", ImVec2(-1, 30))) wallToDelete = selectedIndex;
+                ImGui::PopStyleColor(3);
+
+            } else {
+                selectedType = EntityType::None; // Safe fallback si se borró y quedó desfasado el índice
             }
-            
-            ImGui::PopID();
-        }
-        if (wallToDelete != -1) physics.removeCustomWall(wallToDelete);
-        if (wallToDuplicate != -1) physics.duplicateCustomWall(wallToDuplicate);
-
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), "WIN ZONE CONFIG");
-        bool updateZone = false;
-        updateZone |= ImGui::DragFloat2("Pos", physics.winZonePos, 0.1f);
-        updateZone |= ImGui::DragFloat2("Size", physics.winZoneSize, 0.1f);
-        if (updateZone) physics.updateWinZone(physics.winZonePos[0], physics.winZonePos[1], physics.winZoneSize[0], physics.winZoneSize[1]);
-
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "GLOBAL PHYSICS");
-        ImGui::Checkbox("Gravity", &physics.enableGravity);
-        ImGui::Checkbox("Stop on First Win", &physics.stopOnFirstWin);
-        ImGui::DragFloat("Finish Delay (s)", &physics.finishDelay, 0.05f, 0.0f, 2.0f); // <--- ACÁ
-        ImGui::Checkbox("Chaos", &physics.enableChaos);
-        if (physics.enableChaos) {
-            ImGui::SliderFloat("Chaos %", &physics.chaosChance, 0.0f, 0.5f);
-            ImGui::SliderFloat("Boost", &physics.chaosBoost, 1.0f, 3.0f);
         }
 
         ImGui::End();
 
-        ImGui::SetNextWindowPos(ImVec2(370, 10), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(340, 600), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Racer Inspector", nullptr);
-        
-        ImGui::TextColored(ImVec4(0.5f, 0.5f, 1.0f, 1), "FLEET SETTINGS");
-        float size = physics.currentRacerSize;
-        if (ImGui::DragFloat("Size", &size, 0.05f, 0.1f, 10.0f)) physics.updateRacerSize(size);
-        float rest = physics.currentRestitution;
-        if (ImGui::DragFloat("Bounce", &rest, 0.01f, 0.0f, 2.0f)) physics.updateRestitution(rest);
-        bool fixedRot = physics.currentFixedRotation;
-        if (ImGui::Checkbox("Fixed Rotation", &fixedRot)) physics.updateFixedRotation(fixedRot);
-        ImGui::Checkbox("Enforce Speed", &physics.enforceSpeed);
-        ImGui::DragFloat("Target Vel", &physics.targetSpeed, 0.5f, 0.0f, 100.0f);
-
-        ImGui::Separator();
-        ImGui::Text("INDIVIDUAL CONTROLS");
-        for (size_t i = 0; i < bodies.size(); ++i) {
-            b2Body* b = bodies[i];
-            ImGui::PushStyleColor(ImGuiCol_Header, guiColors[i % 4]);
-            ImGui::PushID((int)i);
-            std::string headerName = (i < 4) ? std::string(racerNames[i]) : "Racer " + std::to_string(i);
-            if (ImGui::CollapsingHeader(headerName.c_str())) {
-                ImGui::PopStyleColor(); 
-                b2Vec2 pos = b->GetPosition(); float p[2] = { pos.x, pos.y };
-                if (ImGui::DragFloat2("Pos", p, 0.1f)) { b->SetTransform(b2Vec2(p[0], p[1]), b->GetAngle()); b->SetAwake(true); }
-                b2Vec2 vel = b->GetLinearVelocity(); float v[2] = { vel.x, vel.y };
-                if (ImGui::DragFloat2("Vel", v, 0.1f)) { b->SetLinearVelocity(b2Vec2(v[0], v[1])); b->SetAwake(true); }
-            } else {
-                ImGui::PopStyleColor();
-            }
-            ImGui::PopID();
+        // Procesamiento de comandos de la UI (Borrar / Duplicar)
+        if (wallToDelete != -1) {
+            physics.removeCustomWall(wallToDelete);
+            selectedType = EntityType::None; // Deseleccionamos por seguridad
         }
-        ImGui::End(); 
+        if (wallToDuplicate != -1) {
+            physics.duplicateCustomWall(wallToDuplicate);
+            selectedType = EntityType::Wall;
+            selectedIndex = (int)physics.getCustomWalls().size() - 1; // Seleccionamos el clon nuevo
+        }
 
         // ==============================================
         // --- DRAW: RENDERIZADO AL BUFFER GIGANTE ---
         // ==============================================
-        gameBuffer.clear(sf::Color(10, 10, 10)); // Usamos el FBO en vez de window
+        gameBuffer.clear(sf::Color(10, 10, 10)); 
         gameBuffer.draw(background);
 
         const auto& customWalls = physics.getCustomWalls();
@@ -525,7 +530,7 @@ int main()
             float thickness = 2.0f + (wall.flashTimer * 2.0f);
             shapeToDraw->setOutlineThickness(-thickness);
 
-            gameBuffer.draw(*shapeToDraw); // DIBUJAMOS AL BUFFER
+            gameBuffer.draw(*shapeToDraw); 
 
             b2Body* zone = physics.getWinZoneBody();
             if (zone) {
@@ -541,7 +546,7 @@ int main()
                 zoneRect.setFillColor(sf::Color(255, 215, 0, (sf::Uint8)alpha)); 
                 zoneRect.setOutlineColor(sf::Color::Yellow);
                 zoneRect.setOutlineThickness(3.0f);
-                gameBuffer.draw(zoneRect); // DIBUJAMOS AL BUFFER
+                gameBuffer.draw(zoneRect); 
             }
         }
 
@@ -564,7 +569,7 @@ int main()
                 grave.setFillColor(sf::Color(20, 20, 20, 240)); 
                 grave.setOutlineColor(deathColor);              
                 grave.setOutlineThickness(2.0f);
-                gameBuffer.draw(grave); // DIBUJAMOS AL BUFFER
+                gameBuffer.draw(grave); 
 
                 float crossThick = 5.0f;               
                 float crossLen = tombSize * 0.8f;      
@@ -584,39 +589,32 @@ int main()
                 bar1.setFillColor(deathColor); 
                 bar2.setFillColor(deathColor);
 
-                gameBuffer.draw(bar1); // DIBUJAMOS AL BUFFER
+                gameBuffer.draw(bar1); 
                 gameBuffer.draw(bar2);
             }
         }
 
-// --- RENDERIZADO DE ESTELAS MEJORADO ---
         for (size_t i = 0; i < trails.size(); ++i) {
             const auto& pts = trails[i].points;
-            if (pts.size() < 2) continue; // Necesitamos al menos 2 puntos para calcular normales
+            if (pts.size() < 2) continue; 
 
-            // Dos pasadas: un halo exterior (glow) y un núcleo brillante (core)
             sf::VertexArray glowVA(sf::TriangleStrip, pts.size() * 2);
             sf::VertexArray coreVA(sf::TriangleStrip, pts.size() * 2);
             
-            // 1. Escala dinámica: atamos el grosor al tamaño del cuadrado en el motor físico
             float baseWidth = physics.currentRacerSize * physics.SCALE; 
 
             for (size_t j = 0; j < pts.size(); ++j) {
-sf::Vector2f normal(1, 0);
+                sf::Vector2f normal(1, 0);
                 
-                // 2. Cálculo de normal con "Miter Joint" (Bisectriz) para evitar tajos en las esquinas
                 if (j == 0) {
-                    // Cabeza (Primer punto)
                     sf::Vector2f dir = pts[1] - pts[0];
                     float len = std::sqrt(dir.x*dir.x + dir.y*dir.y);
                     if (len > 0.001f) normal = sf::Vector2f(-dir.y/len, dir.x/len);
                 } else if (j == pts.size() - 1) {
-                    // Cola (Último punto)
                     sf::Vector2f dir = pts[j] - pts[j-1];
                     float len = std::sqrt(dir.x*dir.x + dir.y*dir.y);
                     if (len > 0.001f) normal = sf::Vector2f(-dir.y/len, dir.x/len);
                 } else {
-                    // Esquinas (Puntos intermedios): Promediamos normales
                     sf::Vector2f d1 = pts[j] - pts[j-1];
                     sf::Vector2f d2 = pts[j+1] - pts[j];
                     
@@ -627,45 +625,30 @@ sf::Vector2f normal(1, 0);
                     if (l1 > 0.001f) n1 = sf::Vector2f(-d1.y/l1, d1.x/l1);
                     if (l2 > 0.001f) n2 = sf::Vector2f(-d2.y/l2, d2.x/l2);
                     
-                    // Sumamos para sacar la bisectriz
                     normal = n1 + n2;
                     float lenN = std::sqrt(normal.x*normal.x + normal.y*normal.y);
                     
                     if (lenN > 0.001f) {
                         normal.x /= lenN;
                         normal.y /= lenN;
-                        
-                        // Factor de inglete (Miter). Si no hacemos esto, la esquina se "afina".
-                        // Lo limitamos a 0.2f para que no explote si el ángulo es casi 180 grados.
                         float miter = normal.x * n1.x + normal.y * n1.y;
                         if (miter > 0.2f) { 
                             normal.x /= miter;
                             normal.y /= miter;
                         }
                     } else {
-                        // Fallback por si justo es un rebote perfectamente opuesto
                         normal = n1; 
                     }
                 }
 
-// Porcentaje de vida del segmento (1.0 = pegado al racer, 0.0 = final de la cola)
                 float lifePct = 1.0f - ((float)j / (float)pts.size());
-                
-                // 3. Tapering curvo: usamos raíz para que el grosor no caiga en línea recta
                 float widthPct = std::pow(lifePct, 0.6f); 
-                
-                // AHORA SÍ: Independizamos el tamaño del brillo y del núcleo
-                // El halo (glow) desborda un 160% el tamaño del racer para iluminar el mapa
                 float glowWidth = baseWidth * widthPct * 1.4f;
-                // El núcleo (core) arranca en un 95% del tamaño del racer para que encaje perfecto
-                // y no parpadee feo por salir de los bordes del cuadrado.
                 float coreWidth = baseWidth * widthPct * 0.5f;
                 
                 sf::Color baseColor = trails[i].color;
                 
-                // --- CAPA EXTERIOR (GLOW) ---
                 sf::Color glowColor = baseColor;
-                // El alpha cae cuadráticamente para que se disipe suave en los bordes
                 glowColor.a = (sf::Uint8)(std::pow(lifePct, 1.5f) * 160.0f); 
                 
                 glowVA[j*2].position = pts[j] + normal * (glowWidth * 0.5f);
@@ -673,9 +656,7 @@ sf::Vector2f normal(1, 0);
                 glowVA[j*2+1].position = pts[j] - normal * (glowWidth * 0.5f);
                 glowVA[j*2+1].color = glowColor;
 
-                // --- CAPA INTERIOR (CORE) ---
                 sf::Color coreColor = sf::Color::White;
-                // Agregamos interpolación hacia blanco para quemar el color central
                 coreColor.r = (baseColor.r + 255 * 2) / 3;
                 coreColor.g = (baseColor.g + 255 * 2) / 3;
                 coreColor.b = (baseColor.b + 255 * 2) / 3;
@@ -687,7 +668,6 @@ sf::Vector2f normal(1, 0);
                 coreVA[j*2+1].color = coreColor;
             }
             
-            // Dibujamos con mezcla alfa tradicional por encima del fondo
             gameBuffer.draw(glowVA);
             gameBuffer.draw(coreVA);
         }
@@ -709,32 +689,20 @@ sf::Vector2f normal(1, 0);
             else rect.setOutlineColor(sf::Color::White);
             rect.setFillColor(sf::Color::White);
             rect.setOutlineThickness(-3.0f);
-            gameBuffer.draw(rect); // DIBUJAMOS AL BUFFER
+            gameBuffer.draw(rect); 
         }
 
-        // Sellamos el frame gigante de 1080p
         gameBuffer.display();
-
-        // Le mandamos el frame crudo de VRAM al grabador
         recorder.addFrame(gameBuffer.getTexture());
 
-        // ==============================================
-        // --- DRAW: PASAR A LA VENTANA CHICA (PANTALLA) ---
-        // ==============================================
         window.clear();
-
-        // Extraemos la textura completa y la convertimos a un Sprite
         sf::Sprite renderSprite(gameBuffer.getTexture());
-        
-        // Escalar de RENDER (1080) a WINDOW (720)
         float scaleX = (float)WINDOW_WIDTH / RENDER_WIDTH;
         float scaleY = (float)WINDOW_HEIGHT / RENDER_HEIGHT;
         renderSprite.setScale(scaleX, scaleY);
         
-        // Dibujamos el "juego" comprimido en nuestra pantalla
         window.draw(renderSprite);
 
-        // ImGui se dibuja ÚNICAMENTE acá, en la ventana del OS, por lo que NO SALE en el video!
         ImGui::SFML::Render(window);
         window.display();
     }
