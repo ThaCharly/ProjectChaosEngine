@@ -149,17 +149,32 @@ int main()
 
         sf::Time dt = clock.restart();
         float dtSec = dt.asSeconds();
+
+        // --- FIX DE SINCRONIZACIÓN PARA 4K PERFECTO ---
+        if (recorder.isRecording) {
+            // Le clavamos el tiempo exacto. No importa si la GPU demora,
+            // para el motor y el video SIEMPRE pasaron 16.6ms por ciclo.
+            dtSec = timeStep;
+        }
         
         physics.updateWallVisuals(dtSec);
         globalTime += dtSec;
 
         if (!physics.isPaused) {
-            accumulator += dtSec;
-            while (accumulator >= timeStep) {
+            if (recorder.isRecording) {
+                // MODO GRABACIÓN: 1 Frame de Video = 1 Step de Física. (Chau acumulador)
                 physics.step(timeStep, velIter, posIter);
-                physics.updateWallExpansion(dtSec);
+                physics.updateWallExpansion(timeStep);
                 physics.updateMovingPlatforms(timeStep);
-                accumulator -= timeStep;
+            } else {
+                // MODO TIEMPO REAL: Usamos el acumulador para compensar tironcitos normales
+                accumulator += dtSec;
+                while (accumulator >= timeStep) {
+                    physics.step(timeStep, velIter, posIter);
+                    physics.updateWallExpansion(timeStep);
+                    physics.updateMovingPlatforms(timeStep);
+                    accumulator -= timeStep;
+                }
             }
         } else {
             accumulator = 0.0f;
