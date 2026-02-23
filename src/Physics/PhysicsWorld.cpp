@@ -879,6 +879,49 @@ for(auto& status : racerStatus) {
     isPaused = true; 
 }
 
+void PhysicsWorld::duplicateCustomWall(int index) {
+    if (index < 0 || index >= customWalls.size()) return;
+
+    const CustomWall& original = customWalls[index];
+    b2Vec2 pos = original.body->GetPosition();
+
+    // Creamos la pared base desfasada 1 metro en X e Y para que se note en pantalla
+    addCustomWall(pos.x + 1.0f, pos.y + 1.0f, original.width, original.height, original.soundID, original.shapeType, original.rotation);
+
+    CustomWall& newWall = customWalls.back();
+
+    // --- COPIAMOS TODAS LAS PROPIEDADES A MANO ---
+    newWall.isExpandable = original.isExpandable;
+    newWall.expansionDelay = original.expansionDelay;
+    newWall.expansionSpeed = original.expansionSpeed;
+    newWall.expansionAxis = original.expansionAxis;
+    newWall.stopOnContact = original.stopOnContact;
+    newWall.stopTargetIdx = original.stopTargetIdx;
+    newWall.maxSize = original.maxSize;
+    newWall.isDeadly = original.isDeadly;
+
+    newWall.isMoving = original.isMoving;
+    // Si se mueve, le desfasamos la ruta también para que corra en paralelo
+    newWall.pointA = original.pointA + b2Vec2(1.0f, 1.0f);
+    newWall.pointB = original.pointB + b2Vec2(1.0f, 1.0f);
+    newWall.moveSpeed = original.moveSpeed;
+    newWall.movingTowardsB = original.movingTowardsB;
+    newWall.reverseOnContact = original.reverseOnContact;
+    newWall.freeBounce = original.freeBounce;
+    newWall.isFreeBouncing = original.isFreeBouncing;
+
+    // Colores y neones
+    newWall.colorIndex = original.colorIndex;
+    newWall.baseFillColor = original.baseFillColor;
+    newWall.neonColor = original.neonColor;
+    newWall.flashColor = original.flashColor;
+
+    // Actualizamos el tipo de cuerpo en Box2D si es una plataforma móvil
+    if (newWall.isMoving) {
+        newWall.body->SetType(b2_kinematicBody);
+    }
+}
+
 void PhysicsWorld::createWalls(float widthPixels, float heightPixels) {
     float width = worldWidthMeters;
     float height = worldHeightMeters;

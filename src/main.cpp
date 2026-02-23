@@ -19,12 +19,12 @@ struct Trail {
     sf::Color color;
 };
 
-sf::Texture createGridTexture(int width, int height) {
+    sf::Texture createGridTexture(int width, int height) {
     sf::RenderTexture rt;
     rt.create(width, height);
-    rt.clear(sf::Color(10, 10, 10)); 
+    rt.clear(sf::Color(30, 30, 30)); 
     sf::RectangleShape line;
-    line.setFillColor(sf::Color(30, 30, 30)); 
+    line.setFillColor(sf::Color(10, 10, 10)); //30,30,30 aca y 10,10,10 en clear para negro con lineas blancas
     line.setSize(sf::Vector2f(2.0f, (float)height));
     for (int x = 0; x < width; x += 60) { 
         line.setPosition((float)x, 0.0f); rt.draw(line);
@@ -35,7 +35,7 @@ sf::Texture createGridTexture(int width, int height) {
     }
     rt.display();
     return rt.getTexture();
-}
+} 
 
 sf::Color lerpColor(const sf::Color& a, const sf::Color& b, float t) {
     if (t < 0.0f) t = 0.0f;
@@ -256,6 +256,7 @@ int main()
         ImGui::Text("Custom Walls List:");
         const auto& walls = physics.getCustomWalls();
         int wallToDelete = -1;
+        int wallToDuplicate = -1;
 
         for (int i = 0; i < walls.size(); ++i) {
             ImGui::PushID(i);
@@ -409,7 +410,7 @@ int main()
                     }
                 }
             
-
+                if (ImGui::Button("DUPLICATE WALL", ImVec2(-1, 20))) wallToDuplicate = i;
                 if (ImGui::Button("DELETE WALL", ImVec2(-1, 20))) wallToDelete = i;
 
                 
@@ -418,6 +419,7 @@ int main()
             ImGui::PopID();
         }
         if (wallToDelete != -1) physics.removeCustomWall(wallToDelete);
+        if (wallToDuplicate != -1) physics.duplicateCustomWall(wallToDuplicate);
 
         ImGui::Separator();
         ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), "WIN ZONE CONFIG");

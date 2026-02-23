@@ -92,6 +92,7 @@ public:
     // --------------------------------------------------
     
     void removeCustomWall(int index);
+    void duplicateCustomWall(int index);
     std::vector<CustomWall>& getCustomWalls(); 
 
     static const std::vector<sf::Color>& getPalette();
