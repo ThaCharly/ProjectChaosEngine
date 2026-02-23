@@ -3,6 +3,11 @@
 #include <string>
 #include <cstdio>
 #include <vector>
+#include <queue>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
 #include <SFML/Graphics.hpp>
 #include <SFML/Audio.hpp> 
 
@@ -11,16 +16,15 @@ public:
     Recorder(int width, int height, int fps, const std::string& outputFilename);
     ~Recorder();
 
-    // Borrá la de sf::Window y poné esta:
-void addFrame(const sf::Texture& texture);
+    void addFrame(const sf::Texture& texture);
     void addAudioEvent(const sf::Int16* samples, std::size_t sampleCount, float volume);
-    
-    // MÉTODO NUEVO: Cierra todo, guarda y fusiona.
     void stop(); 
 
     bool isRecording = false; 
 
 private:
+    void workerLoop(); // <--- El laburante de fondo
+
     FILE* ffmpegPipe = nullptr;
     int width;
     int height;
@@ -29,11 +33,16 @@ private:
     std::string tempVideoFilename;  
     std::string tempAudioFilename;  
 
-    sf::Texture captureTexture;
-    
     std::vector<float> audioMixBuffer; 
     unsigned int sampleRate = 44100;
     long long currentFrame = 0; 
     
-    bool isFinished = false; // Para saber si ya cerramos
+    bool isFinished = false; 
+
+    // --- MULTITHREADING ---
+    std::thread workerThread;
+    std::mutex queueMutex;
+    std::condition_variable queueCV;
+    std::queue<std::vector<sf::Uint8>> frameQueue;
+    std::atomic<bool> isWorkerRunning;
 };

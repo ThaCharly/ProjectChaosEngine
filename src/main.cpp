@@ -19,23 +19,29 @@ struct Trail {
     sf::Color color;
 };
 
+// 1. Arriba de todo, cambiá la grilla para que responda a la resolución
 sf::Texture createGridTexture(int width, int height) {
     sf::RenderTexture rt;
     rt.create(width, height);
     rt.clear(sf::Color(30, 30, 30)); 
     sf::RectangleShape line;
     line.setFillColor(sf::Color(10, 10, 10)); 
-    line.setSize(sf::Vector2f(2.0f, (float)height));
-    for (int x = 0; x < width; x += 60) { 
+    
+    // Si subimos resolución, subimos el grosor y el espacio entre líneas
+    float lineThick = (width / 1080.0f) * 2.0f;
+    int stepSize = width / 18; // 18 cortes en total, da igual si es 1080 o 2160
+    
+    line.setSize(sf::Vector2f(lineThick, (float)height));
+    for (int x = 0; x < width; x += stepSize) { 
         line.setPosition((float)x, 0.0f); rt.draw(line);
     }
-    line.setSize(sf::Vector2f((float)width, 2.0f));
-    for (int y = 0; y < height; y += 60) {
+    line.setSize(sf::Vector2f((float)width, lineThick));
+    for (int y = 0; y < height; y += stepSize) {
         line.setPosition(0.0f, (float)y); rt.draw(line);
     }
     rt.display();
     return rt.getTexture();
-} 
+}
 
 sf::Color lerpColor(const sf::Color& a, const sf::Color& b, float t) {
     if (t < 0.0f) t = 0.0f;
@@ -59,10 +65,10 @@ enum class EntityType { None, Global, WinZone, Racers, Wall };
 
 int main()
 {
-    const unsigned int RENDER_WIDTH = 1080;
-    const unsigned int RENDER_HEIGHT = 1080;
-    const unsigned int WINDOW_WIDTH = 720;
-    const unsigned int WINDOW_HEIGHT = 720;
+    const unsigned int RENDER_WIDTH = 2160;
+    const unsigned int RENDER_HEIGHT = 2160;
+    const unsigned int WINDOW_WIDTH = 1000;
+    const unsigned int WINDOW_HEIGHT = 1000;
     const unsigned int FPS = 60;
     const std::string VIDEO_DIRECTORY = "../output/video.mp4";
 
@@ -527,7 +533,8 @@ int main()
             shapeToDraw->setFillColor(currentFill); 
             shapeToDraw->setOutlineColor(currentOutline);
             
-            float thickness = 2.0f + (wall.flashTimer * 2.0f);
+            float baseThickness = 0.08f * physics.SCALE; 
+            float thickness = baseThickness + (wall.flashTimer * baseThickness);
             shapeToDraw->setOutlineThickness(-thickness);
 
             gameBuffer.draw(*shapeToDraw); 
@@ -545,13 +552,15 @@ int main()
                 zoneRect.setPosition(pos.x * physics.SCALE, pos.y * physics.SCALE);
                 zoneRect.setFillColor(sf::Color(255, 215, 0, (sf::Uint8)alpha)); 
                 zoneRect.setOutlineColor(sf::Color::Yellow);
-                zoneRect.setOutlineThickness(3.0f);
-                gameBuffer.draw(zoneRect); 
+                zoneRect.setOutlineThickness(0.1f * physics.SCALE); // <--- Relativo
+                gameBuffer.draw(zoneRect);
             }
         }
 
         const auto& statuses = physics.getRacerStatus();
-        float tombSize = 36.0f; 
+        float tombSize = 1.2f * physics.SCALE;  // 1.2 metros en escala visual
+        float crossThick = 0.15f * physics.SCALE; // Grosor de la cruz
+        float outlineThick = 0.08f * physics.SCALE;
 
         for (size_t i = 0; i < statuses.size(); ++i) {
             const auto& status = statuses[i];
@@ -568,10 +577,10 @@ int main()
                 grave.setPosition(px, py);
                 grave.setFillColor(sf::Color(20, 20, 20, 240)); 
                 grave.setOutlineColor(deathColor);              
-                grave.setOutlineThickness(2.0f);
+                grave.setOutlineThickness(outlineThick);
                 gameBuffer.draw(grave); 
 
-                float crossThick = 5.0f;               
+            
                 float crossLen = tombSize * 0.8f;      
 
                 sf::RectangleShape bar1(sf::Vector2f(crossLen, crossThick));
@@ -688,7 +697,7 @@ int main()
             if (i < 4) rect.setOutlineColor(racerColors[i]);
             else rect.setOutlineColor(sf::Color::White);
             rect.setFillColor(sf::Color::White);
-            rect.setOutlineThickness(-3.0f);
+            rect.setOutlineThickness(-0.1f * physics.SCALE);
             gameBuffer.draw(rect); 
         }
 

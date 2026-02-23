@@ -8,17 +8,13 @@
 Recorder::Recorder(int width, int height, int fps, const std::string& outputFilename) 
     : width(width), height(height), fps(fps), finalFilename(outputFilename) 
 {
-
     this->width = width + (width % 2);
     this->height = height + (height % 2);
-    
-    if (!captureTexture.create(width, height)) {
-        throw std::runtime_error("No se pudo crear la textura de captura");
-    }
 
     tempVideoFilename = "temp_video_render.mp4";
     tempAudioFilename = "temp_audio_render.wav";
 
+    // Mantenemos el preset ultrafast, el peso lo maneja el thread ahora
     std::string cmd = "ffmpeg -y -loglevel warning "
                       "-f rawvideo -vcodec rawvideo "
                       "-s " + std::to_string(width) + "x" + std::to_string(height) + " "
@@ -33,11 +29,37 @@ Recorder::Recorder(int width, int height, int fps, const std::string& outputFile
     if (!ffmpegPipe) throw std::runtime_error("No se pudo iniciar FFmpeg.");
 
     audioMixBuffer.reserve(44100 * 60 * 5); 
-    std::cout << "[REC] Grabando video temporal en: " << tempVideoFilename << std::endl;
+    
+    // --- ARRANCAR EL MOTOR MULTIHILO ---
+    isWorkerRunning = true;
+    workerThread = std::thread(&Recorder::workerLoop, this);
+
+    std::cout << "[REC] Grabando video 4K temporal en: " << tempVideoFilename << std::endl;
 }
 
 Recorder::~Recorder() {
     stop(); 
+}
+
+void Recorder::workerLoop() {
+    while (true) {
+        std::vector<sf::Uint8> frameData;
+        {
+            std::unique_lock<std::mutex> lock(queueMutex);
+            // El hilo se duerme si la cola está vacía, no gasta CPU
+            queueCV.wait(lock, [this] { return !frameQueue.empty() || !isWorkerRunning; });
+            
+            if (frameQueue.empty() && !isWorkerRunning) break; // Salida limpia
+
+            frameData = std::move(frameQueue.front());
+            frameQueue.pop();
+        }
+
+        // Acá está el cuello de botella que trancaba el juego, ahora corre aislado
+        if (ffmpegPipe) {
+            fwrite(frameData.data(), 1, width * height * 4, ffmpegPipe);
+        }
+    }
 }
 
 void Recorder::stop() {
@@ -45,45 +67,44 @@ void Recorder::stop() {
     isFinished = true;
     isRecording = false;
 
+    // --- FRENAR EL HILO LIMPIAMENTE ---
+    {
+        std::unique_lock<std::mutex> lock(queueMutex);
+        isWorkerRunning = false;
+    }
+    queueCV.notify_one();
+    if (workerThread.joinable()) {
+        std::cout << "[REC] Esperando a que FFmpeg termine de digerir la cola de frames..." << std::endl;
+        workerThread.join();
+    }
+
     if (ffmpegPipe) {
-        std::cout << "[REC] Cerrando pipe de video..." << std::endl;
         pclose(ffmpegPipe);
         ffmpegPipe = nullptr;
     }
 
+    // (El resto del método stop() del Audio Mix y Fusión dejalo igualito a como lo tenés)
     if (!audioMixBuffer.empty()) {
         std::cout << "[REC] Procesando audio (Normalizando)..." << std::endl;
-
-        // 1. ENCONTRAR PICO MÁXIMO (Para evitar clipping/clogging)
         float maxPeak = 0.0f;
         for (float s : audioMixBuffer) {
             if (std::abs(s) > maxPeak) maxPeak = std::abs(s);
         }
 
-        // 2. CALCULAR GANANCIA
-        // El límite de Int16 es 32767. Dejamos un margen (32000) por seguridad.
         float gain = 1.0f;
         if (maxPeak > 32000.0f) {
             gain = 32000.0f / maxPeak;
-            std::cout << "[REC] Audio saturado detectado (Pico: " << maxPeak << "). Reduciendo volumen general por factor: " << gain << std::endl;
         } else if (maxPeak > 0.0f && maxPeak < 10000.0f) {
-            // Opcional: Si quedó muy bajito, lo subimos un poco también
             gain = 25000.0f / maxPeak;
-            std::cout << "[REC] Audio bajo detectado. Boost: " << gain << std::endl;
         }
 
         std::vector<sf::Int16> finalSamples;
         finalSamples.reserve(audioMixBuffer.size() * 2);
 
-        // 3. APLICAR GANANCIA Y EXPORTAR
         for (float sample : audioMixBuffer) {
-            // Aplicamos la normalización
             float normalizedSample = sample * gain;
-
-            // Clamping final de seguridad (por si acaso)
             if (normalizedSample > 32767.0f) normalizedSample = 32767.0f;
             if (normalizedSample < -32768.0f) normalizedSample = -32768.0f;
-            
             sf::Int16 s = static_cast<sf::Int16>(normalizedSample);
             finalSamples.push_back(s); 
             finalSamples.push_back(s); 
@@ -97,10 +118,8 @@ void Recorder::stop() {
     }
 
     std::cout << "[REC] Iniciando fusion final..." << std::endl;
-    
     std::string mergeCmd = "ffmpeg -y -loglevel error -i " + tempVideoFilename + " -i " + tempAudioFilename + 
                            " -c:v copy -c:a aac -b:a 192k -shortest " + finalFilename;
-    
     int result = system(mergeCmd.c_str());
 
     if (result == 0) {
@@ -116,10 +135,20 @@ void Recorder::addFrame(const sf::Texture& texture) {
     if (!ffmpegPipe || !isRecording) return;
     currentFrame++;
     
-    // Bajamos la textura de la VRAM a la RAM de una
+    // SFML te frena acá para pasar VRAM a RAM, pero es el mínimo mal posible.
     sf::Image img = texture.copyToImage();
     const sf::Uint8* pixels = img.getPixelsPtr();
-    fwrite(pixels, 1, width * height * 4, ffmpegPipe);
+    size_t dataSize = width * height * 4;
+    
+    // Armamos el buffer crudo
+    std::vector<sf::Uint8> buffer(pixels, pixels + dataSize);
+
+    // Lo empujamos a la cola con candado para que el hilo trabajador lo mastique
+    {
+        std::lock_guard<std::mutex> lock(queueMutex);
+        frameQueue.push(std::move(buffer));
+    }
+    queueCV.notify_one();
 }
 
 void Recorder::addAudioEvent(const sf::Int16* samples, std::size_t sampleCount, float volume) {
@@ -134,7 +163,6 @@ void Recorder::addAudioEvent(const sf::Int16* samples, std::size_t sampleCount, 
     
     float volFactor = volume / 100.0f;
     for (size_t i = 0; i < sampleCount; ++i) {
-        // Suma directa (el clipping se arregla al final en stop())
         audioMixBuffer[startIndex + i] += (float)samples[i] * volFactor;
     }
 }
