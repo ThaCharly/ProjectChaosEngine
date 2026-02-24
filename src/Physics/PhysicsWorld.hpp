@@ -9,6 +9,21 @@
 #include <string>
 #include "../Sound/SoundManager.hpp" 
 
+struct CollisionEvent {
+    b2Vec2 point;
+    b2Vec2 normal;
+    b2Body* racer;
+    b2Body* wall;
+};
+
+struct Particle {
+    sf::Vector2f position;
+    sf::Vector2f velocity;
+    sf::Color color;
+    float life;
+    float maxLife;
+};
+
 struct RacerStatus {
     bool isAlive = true;
     bool hasFinished = false; // <--- NUEVO
@@ -62,6 +77,7 @@ public:
     std::set<b2Body*> wallsHit;
     b2Body* winZoneBody = nullptr;
     std::set<b2Body*> bodiesReachedWinZone;
+    std::vector<CollisionEvent> collisionEvents;
     
     SoundManager* soundManager = nullptr;
     float worldWidth = 10.0f; 
@@ -81,6 +97,9 @@ public:
     const std::vector<b2Body*>& getDynamicBodies() const;
     b2Body* getWinZoneBody() const;
     void resetRacers();
+
+    const std::vector<Particle>& getParticles() const { return particles; }
+    void updateParticles(float dt); // <--- AGREGAR ESTO
 
     void saveMap(const std::string& filename);
     void loadMap(const std::string& filename);
@@ -148,6 +167,7 @@ private:
     std::vector<CustomWall> customWalls;
     b2Body* winZoneBody = nullptr;
     std::vector<RacerStatus> racerStatus;
+    std::vector<Particle> particles; // <--- AGREGAR ESTO
 
     ChaosContactListener contactListener;
     std::mt19937 rng;

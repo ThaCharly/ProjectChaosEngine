@@ -250,6 +250,7 @@ int main()
         }
         
         physics.updateWallVisuals(dtSec);
+        physics.updateParticles(dtSec);
         globalTime += dtSec;
 
         if (!physics.isPaused) {
@@ -821,7 +822,37 @@ int main()
             gameBuffer.draw(rect); 
         }
 
-gameBuffer.display();
+        // --- DRAW PARTÍCULAS ---
+        const auto& particles = physics.getParticles();
+        if (!particles.empty()) {
+            // Usamos Quads, necesitamos 4 vértices por partícula
+            sf::VertexArray va(sf::Quads, particles.size() * 4);
+            
+            // Tamaño de la partícula escalado a la resolución bruta (2160p)
+            float pSize = (RENDER_WIDTH / 1080.0f) * 4.0f; 
+            
+            for (size_t i = 0; i < particles.size(); ++i) {
+                const auto& p = particles[i];
+                sf::Color c = p.color;
+                
+                // Hacemos que se desvanezcan en el canal Alpha según su vida
+                c.a = (sf::Uint8)(255.0f * (p.life / p.maxLife));
+                
+                // Construimos el cuadradito
+                va[i*4 + 0].position = p.position + sf::Vector2f(-pSize, -pSize);
+                va[i*4 + 1].position = p.position + sf::Vector2f(pSize, -pSize);
+                va[i*4 + 2].position = p.position + sf::Vector2f(pSize, pSize);
+                va[i*4 + 3].position = p.position + sf::Vector2f(-pSize, pSize);
+                
+                va[i*4 + 0].color = c;
+                va[i*4 + 1].color = c;
+                va[i*4 + 2].color = c;
+                va[i*4 + 3].color = c;
+            }
+            gameBuffer.draw(va);
+        }
+
+        gameBuffer.display();
 
         // 1. Declaramos el sprite acá arriba para que exista en todo este bloque
         sf::Sprite renderSprite;

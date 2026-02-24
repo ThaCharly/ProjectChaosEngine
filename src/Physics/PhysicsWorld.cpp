@@ -34,9 +34,24 @@ void ChaosContactListener::BeginContact(b2Contact* contact) {
         dynamicBody = bodyB; wallBody = bodyA;
     }
 
-    if (dynamicBody && wallBody) {
+if (dynamicBody && wallBody) {
         bodiesToCheck.insert(dynamicBody);
-        wallsHit.insert(wallBody); // <--- Marcamos la pared golpeada
+        wallsHit.insert(wallBody);
+
+        // --- EXTRACCIÓN PARA PARTÍCULAS ---
+        b2WorldManifold worldManifold;
+        contact->GetWorldManifold(&worldManifold);
+        
+        CollisionEvent ev;
+        ev.point = worldManifold.points[0]; // Punto de impacto
+        
+        // Box2D saca la normal siempre de A hacia B. 
+        // Nosotros necesitamos que apunte DESDE la pared HACIA afuera.
+        ev.normal = (bodyA == wallBody) ? worldManifold.normal : -worldManifold.normal; 
+        ev.racer = dynamicBody;
+        ev.wall = wallBody;
+        
+        collisionEvents.push_back(ev);
     }
 }
 
@@ -222,6 +237,67 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
             // Nota: La velocidad total (hipotenusa) será targetSpeed * 1.414 (raiz de 2).
             // Pero cumple tu regla: "15 en X, 15 en Y".
             b->SetLinearVelocity(vel);
+        }
+    }
+}
+
+void PhysicsWorld::updateParticles(float dt) {
+    if (isPaused) return;
+
+    // 1. SPAWN: Procesamos los choques de este frame
+    for (auto& ev : contactListener.collisionEvents) {
+        // Sacamos el color de la pared
+        sf::Color wallColor = sf::Color::White;
+        for (const auto& w : customWalls) {
+            if (w.body == ev.wall) { wallColor = w.neonColor; break; }
+        }
+
+        // Sacamos el color del racer por su índice
+        sf::Color racerColor = sf::Color::White;
+        for (size_t i = 0; i < dynamicBodies.size(); ++i) {
+            if (dynamicBodies[i] == ev.racer) {
+                if (i == 0) racerColor = sf::Color(0, 255, 255);
+                else if (i == 1) racerColor = sf::Color(255, 0, 255);
+                else if (i == 2) racerColor = sf::Color(57, 255, 20);
+                else if (i == 3) racerColor = sf::Color(255, 215, 0);
+                break;
+            }
+        }
+
+        // Explotamos 4 partículas
+        for(int i = 0; i < 4; i++) {
+            Particle p;
+            p.position = sf::Vector2f(ev.point.x * SCALE, ev.point.y * SCALE);
+            p.color = (i < 2) ? wallColor : racerColor;
+            
+            // Le metemos una dispersión aleatoria a la normal (aprox -60 a 60 grados)
+            float angleDev = randomFloat(-1.0f, 1.0f); 
+            float cs = std::cos(angleDev);
+            float sn = std::sin(angleDev);
+            sf::Vector2f dir(
+                ev.normal.x * cs - ev.normal.y * sn,
+                ev.normal.x * sn + ev.normal.y * cs
+            );
+            
+            // Velocidad inicial picante
+            float speed = randomFloat(200.0f, 600.0f); 
+            p.velocity = dir * speed;
+            p.maxLife = 0.5f;
+            p.life = p.maxLife;
+            particles.push_back(p);
+        }
+    }
+    contactListener.collisionEvents.clear();
+
+    // 2. CINEMÁTICA: Movemos las que ya están vivas
+    for (auto it = particles.begin(); it != particles.end(); ) {
+        it->life -= dt;
+        if (it->life <= 0.0f) {
+            it = particles.erase(it); // Se murió, la borramos del vector
+        } else {
+            it->position += it->velocity * dt;
+            it->velocity.y += 900.0f * dt; // Gravedad cruda en píxeles (caen)
+            ++it;
         }
     }
 }
