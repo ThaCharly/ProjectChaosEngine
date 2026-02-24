@@ -14,14 +14,15 @@ Recorder::Recorder(int width, int height, int fps, const std::string& outputFile
     tempVideoFilename = "temp_video_render.mp4";
     tempAudioFilename = "temp_audio_render.wav";
 
-    // Mantenemos el preset ultrafast, el peso lo maneja el thread ahora
+    // Usamos la fuerza bruta del Ryzen: 14 hilos para FFmpeg, dejamos 2 libres para el motor físico.
+    // -crf 18 te da calidad casi lossless sin generar archivos de 40GB.
     std::string cmd = "ffmpeg -y -loglevel warning "
                       "-f rawvideo -vcodec rawvideo "
                       "-s " + std::to_string(width) + "x" + std::to_string(height) + " "
                       "-pix_fmt rgba "
                       "-r " + std::to_string(fps) + " "
                       "-i - "
-                      "-c:v libx264 -preset ultrafast "
+                      "-c:v libx264 -preset ultrafast -crf 18 -threads 14 " 
                       "-pix_fmt yuv420p "
                       "\"" + tempVideoFilename + "\""; 
 
@@ -30,11 +31,10 @@ Recorder::Recorder(int width, int height, int fps, const std::string& outputFile
 
     audioMixBuffer.reserve(44100 * 60 * 5); 
     
-    // --- ARRANCAR EL MOTOR MULTIHILO ---
     isWorkerRunning = true;
     workerThread = std::thread(&Recorder::workerLoop, this);
 
-    std::cout << "[REC] Grabando video 4K temporal en: " << tempVideoFilename << std::endl;
+    std::cout << "[REC] Grabando video 4K (CPU Multihilo) en: " << tempVideoFilename << std::endl;
 }
 
 Recorder::~Recorder() {

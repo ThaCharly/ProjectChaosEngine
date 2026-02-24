@@ -67,15 +67,29 @@ int main()
 {
     const unsigned int RENDER_WIDTH = 2160;
     const unsigned int RENDER_HEIGHT = 2160;
-    const unsigned int WINDOW_WIDTH = 1000;
-    const unsigned int WINDOW_HEIGHT = 1000;
+    const float DISPLAY_SIZE = 900.0f;
     const unsigned int FPS = 60;
     const std::string VIDEO_DIRECTORY = "../output/video.mp4";
 
-    sf::RenderWindow window(sf::VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), "ChaosEngine - Neon Lab", sf::Style::Titlebar | sf::Style::Close);
+    sf::VideoMode desktopMode = sf::VideoMode::getDesktopMode();
+    sf::RenderWindow window(desktopMode, "ChaosEngine - Neon Lab", sf::Style::Fullscreen);
     window.setFramerateLimit(FPS);
 
     if (!ImGui::SFML::Init(window)) return -1;
+
+    // --- ESTILO IMGUI TIPO MOTOR GRÁFICO ---
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.WindowRounding = 4.0f;
+    style.FrameRounding = 3.0f;
+    style.Colors[ImGuiCol_WindowBg] = ImVec4(0.12f, 0.12f, 0.12f, 0.95f);
+    style.Colors[ImGuiCol_TitleBg] = ImVec4(0.08f, 0.08f, 0.08f, 1.0f);
+    style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.15f, 0.15f, 0.15f, 1.0f);
+    style.Colors[ImGuiCol_Header] = ImVec4(0.2f, 0.2f, 0.2f, 1.0f);
+    style.Colors[ImGuiCol_HeaderHovered] = ImVec4(0.3f, 0.3f, 0.3f, 1.0f);
+    style.Colors[ImGuiCol_HeaderActive] = ImVec4(0.4f, 0.4f, 0.4f, 1.0f);
+    style.Colors[ImGuiCol_Button] = ImVec4(0.25f, 0.25f, 0.25f, 1.0f);
+    style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.35f, 0.35f, 0.35f, 1.0f);
+    style.Colors[ImGuiCol_ButtonActive] = ImVec4(0.45f, 0.45f, 0.45f, 1.0f);
 
     sf::RenderTexture gameBuffer;
     if (!gameBuffer.create(RENDER_WIDTH, RENDER_HEIGHT)) {
@@ -210,8 +224,10 @@ int main()
         // ==============================================
 
         // 1. TOOLBAR (Panel Superior)
-        ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(700, 60), ImGuiCond_FirstUseEver);
+// 1. TOOLBAR (Panel Superior, anclado arriba y ocupando el ancho del centro)
+        float panelWidth = 320.0f;
+        ImGui::SetNextWindowPos(ImVec2(panelWidth, 0), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(desktopMode.width - (panelWidth * 2), 65), ImGuiCond_Always);
         ImGui::Begin("Toolbar", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoMove);
 
         if (recorder.isRecording) {
@@ -257,9 +273,9 @@ int main()
         ImGui::End();
 
         // 2. HIERARCHY (Panel Izquierdo)
-        ImGui::SetNextWindowPos(ImVec2(10, 80), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(200, 630), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Hierarchy", nullptr, ImGuiWindowFlags_NoMove);
+        ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(panelWidth, desktopMode.height), ImGuiCond_Always);
+        ImGui::Begin("Hierarchy", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
 
         ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, 1), "SCENE");
         if (ImGui::Selectable("Global Settings", selectedType == EntityType::Global)) selectedType = EntityType::Global;
@@ -290,10 +306,10 @@ int main()
         }
         ImGui::End();
 
-        // 3. INSPECTOR (Panel Derecho)
-        ImGui::SetNextWindowPos(ImVec2(470, 80), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(240, 630), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Inspector", nullptr, ImGuiWindowFlags_NoMove);
+        // 3. INSPECTOR (Panel Derecho, de arriba a abajo)
+        ImGui::SetNextWindowPos(ImVec2(desktopMode.width - panelWidth, 0), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(panelWidth, desktopMode.height), ImGuiCond_Always);
+        ImGui::Begin("Inspector", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
 
         int wallToDelete = -1;
         int wallToDuplicate = -1;
@@ -573,7 +589,7 @@ int main()
         }
 
         const auto& statuses = physics.getRacerStatus();
-        float tombSize = 1.2f * physics.SCALE;  // 1.2 metros en escala visual
+        float tombSize = 0.8f * physics.SCALE;  // 1.0 metros en escala visual
         float crossThick = 0.15f * physics.SCALE; // Grosor de la cruz
         float outlineThick = 0.08f * physics.SCALE;
 
@@ -719,12 +735,28 @@ int main()
         gameBuffer.display();
         recorder.addFrame(gameBuffer.getTexture());
 
-        window.clear();
+        window.clear(); // Un gris oscuro para el fondo del "editor"
+
         sf::Sprite renderSprite(gameBuffer.getTexture());
-        float scaleX = (float)WINDOW_WIDTH / RENDER_WIDTH;
-        float scaleY = (float)WINDOW_HEIGHT / RENDER_HEIGHT;
-        renderSprite.setScale(scaleX, scaleY);
         
+        // Calculamos la escala asumiendo que el RENDER es cuadrado (2160x2160)
+        float scale = DISPLAY_SIZE / (float)RENDER_WIDTH; 
+        renderSprite.setScale(scale, scale);
+        
+        // Matemática fina para clavar el viewport en el centro de tu monitor
+        float offsetX = (desktopMode.width - DISPLAY_SIZE) / 2.0f;
+        float offsetY = (desktopMode.height - DISPLAY_SIZE) / 2.0f;
+        
+        renderSprite.setPosition(offsetX, offsetY);
+
+        // Opcional: Le metemos un marquito sutil al viewport para que se despegue del fondo
+        sf::RectangleShape viewportBorder(sf::Vector2f(DISPLAY_SIZE + 2, DISPLAY_SIZE + 2));
+        viewportBorder.setPosition(offsetX - 1, offsetY - 1);
+        viewportBorder.setFillColor(sf::Color::Transparent);
+        viewportBorder.setOutlineColor(sf::Color(60, 60, 60));
+        viewportBorder.setOutlineThickness(1.0f);
+        
+        window.draw(viewportBorder);
         window.draw(renderSprite);
 
         ImGui::SFML::Render(window);
