@@ -24,9 +24,13 @@ const char* brightnessFrag = R"(
     uniform float threshold;
     void main() {
         vec4 color = texture2D(source, gl_TexCoord[0].xy);
-        // Calculamos la luminancia (qué tan brillante es el píxel)
-        float luminance = dot(color.rgb, vec3(0.299, 0.587, 0.114));
-        if (luminance > threshold) {
+        
+        // NORMALIZACIÓN DE NEÓN:
+        // Usamos el canal más alto del pixel en lugar de la luminancia del ojo humano.
+        // Así un Azul puro (0,0,1) y un Verde puro (0,1,0) tienen un brillo = 1.0.
+        float maxBrightness = max(color.r, max(color.g, color.b));
+        
+        if (maxBrightness > threshold) {
             gl_FragColor = color;
         } else {
             gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
