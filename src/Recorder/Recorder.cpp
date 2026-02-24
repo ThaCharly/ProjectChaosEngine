@@ -4,6 +4,29 @@
 #include <algorithm> 
 #include <cmath>     
 #include <fstream> 
+#include <SFML/Window/Context.hpp> // Para enganchar funciones de OpenGL
+
+// --- DEFINICIONES DE OPENGL ---
+#ifndef GL_PIXEL_PACK_BUFFER
+#define GL_PIXEL_PACK_BUFFER 0x88EB
+#define GL_STREAM_READ 0x88E1
+#define GL_READ_ONLY 0x88B8
+#endif
+
+typedef void (*glGenBuffersFunc)(GLsizei, GLuint*);
+typedef void (*glBindBufferFunc)(GLenum, GLuint);
+typedef void (*glBufferDataFunc)(GLenum, GLsizeiptr, const GLvoid*, GLenum);
+typedef void* (*glMapBufferFunc)(GLenum, GLenum);
+typedef GLboolean (*glUnmapBufferFunc)(GLenum);
+typedef void (*glDeleteBuffersFunc)(GLsizei, const GLuint*);
+
+// Punteros globales para este archivo
+glGenBuffersFunc my_glGenBuffers = nullptr;
+glBindBufferFunc my_glBindBuffer = nullptr;
+glBufferDataFunc my_glBufferData = nullptr;
+glMapBufferFunc my_glMapBuffer = nullptr;
+glUnmapBufferFunc my_glUnmapBuffer = nullptr;
+glDeleteBuffersFunc my_glDeleteBuffers = nullptr;
 
 Recorder::Recorder(int width, int height, int fps, const std::string& outputFilename) 
     : width(width), height(height), fps(fps), finalFilename(outputFilename) 
@@ -14,67 +37,128 @@ Recorder::Recorder(int width, int height, int fps, const std::string& outputFile
     tempVideoFilename = "temp_video_render.mp4";
     tempAudioFilename = "temp_audio_render.wav";
 
-    // --- MAGIA ROJA DE AMD (VA-API) ---
-    // Usamos el bloque VCN del Ryzen. 
-    // -vaapi_device apunta al nodo de renderizado de la iGPU.
-    // hwupload pasa el frame por DMA directo al codificador de hardware.
+// --- MAGIA VERDE DE NVIDIA (NVENC) ---
+    // -vf "vflip,format=yuv420p": vflip corrige el eje Y de OpenGL, 
+    // y format=yuv420p asegura que los colores sean compatibles con cualquier reproductor.
+    // -c:v h264_nvenc: Usamos el chip dedicado de la RTX 5050.
     std::string cmd = "ffmpeg -y -loglevel warning "
-                      "-vaapi_device /dev/dri/renderD128 " 
                       "-f rawvideo -vcodec rawvideo "
                       "-s " + std::to_string(width) + "x" + std::to_string(height) + " "
                       "-pix_fmt rgba "
                       "-r " + std::to_string(fps) + " "
                       "-i - "
-                      "-vf \"format=nv12,hwupload\" " 
-                      "-c:v h264_vaapi -qp 20 -b:v 50M " 
-                      "\"" + tempVideoFilename + "\""; 
+                      "-vf \"vflip,format=yuv420p\" " 
+                      "-c:v h264_nvenc -preset p6 -tune hq -b:v 50M " 
+                      "\"" + tempVideoFilename + "\"";
 
     ffmpegPipe = popen(cmd.c_str(), "w");
     if (!ffmpegPipe) throw std::runtime_error("No se pudo iniciar FFmpeg.");
 
     audioMixBuffer.reserve(44100 * 60 * 5); 
+
+    // --- 1. CARGAMOS LAS FUNCIONES EXTENDIDAS DE OPENGL ---
+    my_glGenBuffers = (glGenBuffersFunc)sf::Context::getFunction("glGenBuffers");
+    my_glBindBuffer = (glBindBufferFunc)sf::Context::getFunction("glBindBuffer");
+    my_glBufferData = (glBufferDataFunc)sf::Context::getFunction("glBufferData");
+    my_glMapBuffer = (glMapBufferFunc)sf::Context::getFunction("glMapBuffer");
+    my_glUnmapBuffer = (glUnmapBufferFunc)sf::Context::getFunction("glUnmapBuffer");
+    my_glDeleteBuffers = (glDeleteBuffersFunc)sf::Context::getFunction("glDeleteBuffers");
+
+    if (!my_glGenBuffers || !my_glBindBuffer || !my_glBufferData || !my_glMapBuffer || !my_glUnmapBuffer) {
+        throw std::runtime_error("Pah, la gráfica no soporta PBOs o falló la carga de OpenGL.");
+    }
+
+    // --- 2. INICIALIZAMOS EL DOBLE BUFFER (PING-PONG) ---
+    size_t dataSize = this->width * this->height * 4;
+    my_glGenBuffers(2, pbo);
+    
+    my_glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo[0]);
+    my_glBufferData(GL_PIXEL_PACK_BUFFER, dataSize, nullptr, GL_STREAM_READ);
+    
+    my_glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo[1]);
+    my_glBufferData(GL_PIXEL_PACK_BUFFER, dataSize, nullptr, GL_STREAM_READ);
+    
+    my_glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
     
     isWorkerRunning = true;
     workerThread = std::thread(&Recorder::workerLoop, this);
 
-    std::cout << "[REC] Grabando video 4K por hardware (AMD VCN) en: " << tempVideoFilename << std::endl;
+    std::cout << "[REC] Grabando video 4K ASÍNCRONO por hardware (AMD VCN) en: " << tempVideoFilename << std::endl;
 }
 
 Recorder::~Recorder() {
     stop(); 
+    if (my_glDeleteBuffers) {
+        my_glDeleteBuffers(2, pbo);
+    }
 }
 
 void Recorder::addFrame(const sf::Texture& texture) {
     if (!ffmpegPipe || !isRecording) return;
     currentFrame++;
     
-    // Extracción de VRAM a RAM. (Aún frena el hilo, pero es la única copia)
-    sf::Image img = texture.copyToImage();
+    size_t dataSize = width * height * 4;
 
-    // Movemos la imagen a la cola, no copiamos los píxeles
-    {
-        std::lock_guard<std::mutex> lock(queueMutex);
-        frameQueue.push(std::move(img)); 
+    // 1. Forzamos a SFML a vincular su textura en la máquina de estados de OpenGL
+    sf::Texture::bind(&texture);
+
+    // 2. TRANSFERENCIA ASÍNCRONA (VRAM -> PBO)
+    // Le ordenamos al controlador DMA de la GPU que empiece a copiar la textura.
+    // Esto NO bloquea la CPU, retorna instantáneamente.
+    my_glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo[pboIndex]);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+
+    // 3. LEER EL FRAME ANTERIOR (PBO -> RAM)
+    if (!firstFrame) {
+        my_glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo[nextPboIndex]);
+        
+        // Mapeamos la memoria del PBO que ya terminó de transferirse
+        GLubyte* ptr = (GLubyte*)my_glMapBuffer(GL_PIXEL_PACK_BUFFER, GL_READ_ONLY);
+
+        if (ptr) {
+            // Acá sí hacemos la copia a RAM, pero la info ya viajó por el PCIe
+            std::vector<sf::Uint8> buffer(ptr, ptr + dataSize);
+            my_glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+
+            // Lo mandamos al hilo esclavo de FFmpeg
+            {
+                std::lock_guard<std::mutex> lock(queueMutex);
+                frameQueue.push(std::move(buffer));
+            }
+            queueCV.notify_one();
+        }
+    } else {
+        // Sacrificamos el primerísimo frame visual porque el PBO "next" todavía tiene basura
+        firstFrame = false; 
     }
-    queueCV.notify_one();
+
+    // 4. LIMPIEZA
+    my_glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    sf::Texture::bind(nullptr);
+
+    // 5. CAMBIO DE ROLES (Ping-Pong)
+    pboIndex = (pboIndex + 1) % 2;
+    nextPboIndex = (pboIndex + 1) % 2;
 }
+
+// ... EL RESTO QUEDA IGUAL (workerLoop, stop, addAudioEvent) ...
 
 void Recorder::workerLoop() {
     while (true) {
-        sf::Image currentImage;
+        std::vector<sf::Uint8> currentFrameData; // <--- AHORA SÍ ESPERAMOS UN VECTOR
         {
             std::unique_lock<std::mutex> lock(queueMutex);
             queueCV.wait(lock, [this] { return !frameQueue.empty() || !isWorkerRunning; });
             
             if (frameQueue.empty() && !isWorkerRunning) break;
 
-            currentImage = std::move(frameQueue.front());
+            currentFrameData = std::move(frameQueue.front());
             frameQueue.pop();
         }
 
-        // Leemos directo del buffer interno de sf::Image en el hilo de FFmpeg
+        // Leemos directo de la memoria contigua del vector para escupirlo a FFmpeg
         if (ffmpegPipe) {
-            fwrite(currentImage.getPixelsPtr(), 1, width * height * 4, ffmpegPipe);
+            fwrite(currentFrameData.data(), 1, width * height * 4, ffmpegPipe); // <--- Usamos .data()
         }
     }
 }

@@ -224,7 +224,7 @@ int main()
         // ==============================================
 
         // 1. TOOLBAR (Panel Superior)
-// 1. TOOLBAR (Panel Superior, anclado arriba y ocupando el ancho del centro)
+    // 1. TOOLBAR (Panel Superior, anclado arriba y ocupando el ancho del centro)
         float panelWidth = 320.0f;
         ImGui::SetNextWindowPos(ImVec2(panelWidth, 0), ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2(desktopMode.width - (panelWidth * 2), 65), ImGuiCond_Always);

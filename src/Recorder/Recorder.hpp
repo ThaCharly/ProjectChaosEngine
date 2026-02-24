@@ -9,7 +9,7 @@
 #include <condition_variable>
 #include <atomic>
 #include <SFML/Graphics.hpp>
-#include <SFML/Graphics/Image.hpp>
+#include <SFML/OpenGL.hpp> // <--- Magia de OpenGL
 #include <SFML/Audio.hpp> 
 
 class Recorder {
@@ -24,7 +24,7 @@ public:
     bool isRecording = false; 
 
 private:
-    void workerLoop(); // <--- El laburante de fondo
+    void workerLoop(); 
 
     FILE* ffmpegPipe = nullptr;
     int width;
@@ -44,6 +44,12 @@ private:
     std::thread workerThread;
     std::mutex queueMutex;
     std::condition_variable queueCV;
-    std::queue<sf::Image> frameQueue;
+    std::queue<std::vector<sf::Uint8>> frameQueue;
     std::atomic<bool> isWorkerRunning;
+
+    // --- PBOs (Pixel Buffer Objects) ---
+    GLuint pbo[2];
+    int pboIndex = 0;
+    int nextPboIndex = 1;
+    bool firstFrame = true;
 };
