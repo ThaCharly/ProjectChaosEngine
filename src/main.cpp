@@ -273,14 +273,16 @@ int main()
             accumulator = 0.0f;
         }
 
-        if (!physics.isPaused) {
+if (!physics.isPaused) {
             for (size_t i = 0; i < bodies.size(); ++i) {
                 if (i >= trails.size()) break;
                 b2Vec2 pos = bodies[i]->GetPosition();
                 sf::Vector2f p(pos.x * physics.SCALE, pos.y * physics.SCALE);
                 trails[i].points.push_front(p);
                 float speed = bodies[i]->GetLinearVelocity().Length();
-                size_t maxPoints = (size_t)(speed * 3.0f) + 10; 
+                
+                // >>> ESTELAS MÁS CORTAS ACÁ <<<
+                size_t maxPoints = (size_t)(speed * 1.5f) + 5; 
                 if (trails[i].points.size() > maxPoints) trails[i].points.pop_back();
             }
         }
@@ -728,78 +730,86 @@ int main()
             const auto& pts = trails[i].points;
             if (pts.size() < 2) continue; 
 
-            sf::VertexArray glowVA(sf::TriangleStrip, pts.size() * 2);
-            sf::VertexArray coreVA(sf::TriangleStrip, pts.size() * 2);
+            // Usamos Quads en lugar de TriangleStrip para evitar "tajos" en curvas cerradas
+            sf::VertexArray glowVA(sf::Quads);
+            sf::VertexArray coreVA(sf::Quads);
             
+            // Ancho constante, clavado al tamaño del racer
             float baseWidth = physics.currentRacerSize * physics.SCALE; 
 
-            for (size_t j = 0; j < pts.size(); ++j) {
-                sf::Vector2f normal(1, 0);
-                
-                if (j == 0) {
-                    sf::Vector2f dir = pts[1] - pts[0];
-                    float len = std::sqrt(dir.x*dir.x + dir.y*dir.y);
-                    if (len > 0.001f) normal = sf::Vector2f(-dir.y/len, dir.x/len);
-                } else if (j == pts.size() - 1) {
-                    sf::Vector2f dir = pts[j] - pts[j-1];
-                    float len = std::sqrt(dir.x*dir.x + dir.y*dir.y);
-                    if (len > 0.001f) normal = sf::Vector2f(-dir.y/len, dir.x/len);
-                } else {
-                    sf::Vector2f d1 = pts[j] - pts[j-1];
-                    sf::Vector2f d2 = pts[j+1] - pts[j];
-                    
-                    float l1 = std::sqrt(d1.x*d1.x + d1.y*d1.y);
-                    float l2 = std::sqrt(d2.x*d2.x + d2.y*d2.y);
-                    
-                    sf::Vector2f n1(1, 0), n2(1, 0);
-                    if (l1 > 0.001f) n1 = sf::Vector2f(-d1.y/l1, d1.x/l1);
-                    if (l2 > 0.001f) n2 = sf::Vector2f(-d2.y/l2, d2.x/l2);
-                    
-                    normal = n1 + n2;
-                    float lenN = std::sqrt(normal.x*normal.x + normal.y*normal.y);
-                    
-                    if (lenN > 0.001f) {
-                        normal.x /= lenN;
-                        normal.y /= lenN;
-                        float miter = normal.x * n1.x + normal.y * n1.y;
-                        if (miter > 0.2f) { 
-                            normal.x /= miter;
-                            normal.y /= miter;
-                        }
-                    } else {
-                        normal = n1; 
-                    }
-                }
+for (size_t j = 1; j < pts.size(); ++j) {
+                sf::Vector2f p1 = pts[j-1];
+                sf::Vector2f p2 = pts[j];
 
-                float lifePct = 1.0f - ((float)j / (float)pts.size());
-                float widthPct = std::pow(lifePct, 0.6f); 
-                float glowWidth = baseWidth * widthPct * 1.4f;
-                float coreWidth = baseWidth * widthPct * 0.5f;
-                
+                sf::Vector2f dir = p2 - p1;
+                float len = std::sqrt(dir.x*dir.x + dir.y*dir.y);
+                if (len < 0.001f) continue;
+
+                sf::Vector2f normal(-dir.y/len, dir.x/len);
+
+                // Cálculo de vida (0.0 a 1.0) para ir apagando la luz
+                float lifePct1 = 1.0f - ((float)(j-1) / (float)pts.size());
+                float lifePct2 = 1.0f - ((float)j / (float)pts.size());
+
+                // MAGIA ACÁ: Factor de ancho para que termine en punta.
+                // Usamos pow() para que la caída de grosor sea suave y no tan lineal.
+                float widthPct1 = std::pow(lifePct1, 0.6f);
+                float widthPct2 = std::pow(lifePct2, 0.6f);
+
                 sf::Color baseColor = trails[i].color;
-                
-                sf::Color glowColor = baseColor;
-                glowColor.a = (sf::Uint8)(std::pow(lifePct, 1.5f) * 160.0f); 
-                
-                glowVA[j*2].position = pts[j] + normal * (glowWidth * 0.5f);
-                glowVA[j*2].color = glowColor;
-                glowVA[j*2+1].position = pts[j] - normal * (glowWidth * 0.5f);
-                glowVA[j*2+1].color = glowColor;
 
-                sf::Color coreColor = sf::Color::White;
-                coreColor.r = (baseColor.r + 255 * 2) / 3;
-                coreColor.g = (baseColor.g + 255 * 2) / 3;
-                coreColor.b = (baseColor.b + 255 * 2) / 3;
-                coreColor.a = (sf::Uint8)(lifePct * 240.0f);
+                // GLOW: Color base transparente
+                sf::Color glowColor1 = baseColor;
+                glowColor1.a = (sf::Uint8)(lifePct1 * 120.0f);
+                sf::Color glowColor2 = baseColor;
+                glowColor2.a = (sf::Uint8)(lifePct2 * 120.0f);
+
+                // CORE: Blanco brillante mezclado con el color base, clave para reventar el BLOOM
+                sf::Color coreColor1 = sf::Color::White;
+                coreColor1.r = (sf::Uint8)((baseColor.r + 255 * 2) / 3);
+                coreColor1.g = (sf::Uint8)((baseColor.g + 255 * 2) / 3);
+                coreColor1.b = (sf::Uint8)((baseColor.b + 255 * 2) / 3);
+                coreColor1.a = (sf::Uint8)(lifePct1 * 255.0f);
+
+                sf::Color coreColor2 = sf::Color::White;
+                coreColor2.r = (sf::Uint8)((baseColor.r + 255 * 2) / 3);
+                coreColor2.g = (sf::Uint8)((baseColor.g + 255 * 2) / 3);
+                coreColor2.b = (sf::Uint8)((baseColor.b + 255 * 2) / 3);
+                coreColor2.a = (sf::Uint8)(lifePct2 * 255.0f);
+
+                // Calculamos los anchos dinámicos multiplicando tus valores por el porcentaje de vida
+                float coreW1 = (baseWidth * 0.3f) * widthPct1;
+                float coreW2 = (baseWidth * 0.3f) * widthPct2;
                 
-                coreVA[j*2].position = pts[j] + normal * (coreWidth * 0.5f);
-                coreVA[j*2].color = coreColor;
-                coreVA[j*2+1].position = pts[j] - normal * (coreWidth * 0.5f);
-                coreVA[j*2+1].color = coreColor;
+                float glowWidth = baseWidth * 1.6f;
+                float glowW1 = (glowWidth * 0.4f) * widthPct1;
+                float glowW2 = (glowWidth * 0.4f) * widthPct2;
+
+                // SOLAPAMIENTO SUTIL (Overlap)
+                sf::Vector2f overlap = (dir / len) * (baseWidth * 0.08f);
+                sf::Vector2f p1_ext = p1 - overlap;
+                sf::Vector2f p2_ext = p2 + overlap;
+
+                // Vértices del Core (Afinándose hacia atrás)
+                coreVA.append(sf::Vertex(p1_ext + normal * coreW1, coreColor1));
+                coreVA.append(sf::Vertex(p1_ext - normal * coreW1, coreColor1));
+                coreVA.append(sf::Vertex(p2_ext - normal * coreW2, coreColor2));
+                coreVA.append(sf::Vertex(p2_ext + normal * coreW2, coreColor2));
+
+                // Vértices del Glow (Afinándose hacia atrás)
+                glowVA.append(sf::Vertex(p1_ext + normal * glowW1, glowColor1));
+                glowVA.append(sf::Vertex(p1_ext - normal * glowW1, glowColor1));
+                glowVA.append(sf::Vertex(p2_ext - normal * glowW2, glowColor2));
+                glowVA.append(sf::Vertex(p2_ext + normal * glowW2, glowColor2));
             }
+
+            // MAGIA ACÁ: Fusión Aditiva (BlendAdd). 
+            // En vez de tapar lo que hay abajo, suma luz. El shader de Bloom se hace un festín.
+            sf::RenderStates states;
+            states.blendMode = sf::BlendAdd;
             
-            gameBuffer.draw(glowVA);
-            gameBuffer.draw(coreVA);
+            gameBuffer.draw(glowVA, states);
+            gameBuffer.draw(coreVA, states);
         }
 
         const auto& currentStatuses = physics.getRacerStatus(); 
