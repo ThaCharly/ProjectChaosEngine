@@ -37,10 +37,11 @@ Recorder::Recorder(int width, int height, int fps, const std::string& outputFile
     tempVideoFilename = "temp_video_render.mp4";
     tempAudioFilename = "temp_audio_render.wav";
 
-// --- MAGIA VERDE DE NVIDIA (NVENC) ---
-    // -vf "vflip,format=yuv420p": vflip corrige el eje Y de OpenGL, 
-    // y format=yuv420p asegura que los colores sean compatibles con cualquier reproductor.
-    // -c:v h264_nvenc: Usamos el chip dedicado de la RTX 5050.
+    // --- MAGIA VERDE DE NVIDIA (NVENC HEVC) ---
+    // -vf "vflip,format=yuv420p": vflip corrige el eje Y de OpenGL, format asegura compatibilidad.
+    // -c:v hevc_nvenc: Códec H.265 por hardware NVIDIA.
+    // -preset p7 -tune hq: Calidad absolutamente máxima del encoder.
+    // -rc vbr -cq 18 -b:v 0: Calidad Constante (18 es calidad visualmente sin pérdida).
     std::string cmd = "ffmpeg -y -loglevel warning "
                       "-f rawvideo -vcodec rawvideo "
                       "-s " + std::to_string(width) + "x" + std::to_string(height) + " "
@@ -48,13 +49,13 @@ Recorder::Recorder(int width, int height, int fps, const std::string& outputFile
                       "-r " + std::to_string(fps) + " "
                       "-i - "
                       "-vf \"vflip,format=yuv420p\" " 
-                      "-c:v h264_nvenc -preset p6 -tune hq -b:v 50M " 
-                      "\"" + tempVideoFilename + "\"";
+                      "-c:v hevc_nvenc -preset p7 -tune hq -rc vbr -cq 18 -b:v 0 " 
+                      "\"" + tempVideoFilename + "\""; 
 
     ffmpegPipe = popen(cmd.c_str(), "w");
     if (!ffmpegPipe) throw std::runtime_error("No se pudo iniciar FFmpeg.");
 
-    audioMixBuffer.reserve(44100 * 60 * 5); 
+    audioMixBuffer.reserve(44100 * 60 * 5);
 
     // --- 1. CARGAMOS LAS FUNCIONES EXTENDIDAS DE OPENGL ---
     my_glGenBuffers = (glGenBuffersFunc)sf::Context::getFunction("glGenBuffers");
@@ -83,7 +84,7 @@ Recorder::Recorder(int width, int height, int fps, const std::string& outputFile
     isWorkerRunning = true;
     workerThread = std::thread(&Recorder::workerLoop, this);
 
-    std::cout << "[REC] Grabando video 4K ASÍNCRONO por hardware (AMD VCN) en: " << tempVideoFilename << std::endl;
+    std::cout << "[REC] Grabando video 4K ASÍNCRONO por hardware (NVIDIA HEVC/H.265) en: " << tempVideoFilename << std::endl;
 }
 
 Recorder::~Recorder() {
