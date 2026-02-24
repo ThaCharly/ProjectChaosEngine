@@ -19,6 +19,53 @@ struct Trail {
     sf::Color color;
 };
 
+const char* brightnessFrag = R"(
+    uniform sampler2D source;
+    uniform float threshold;
+    void main() {
+        vec4 color = texture2D(source, gl_TexCoord[0].xy);
+        // Calculamos la luminancia (qué tan brillante es el píxel)
+        float luminance = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+        if (luminance > threshold) {
+            gl_FragColor = color;
+        } else {
+            gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+        }
+    }
+)";
+
+// Desenfoque Gaussiano Separable (Muchísimo más rápido que el bidimensional)
+const char* blurFrag = R"(
+    uniform sampler2D source;
+    uniform vec2 dir; // Dirección del desenfoque (horizontal o vertical)
+    void main() {
+        vec2 uv = gl_TexCoord[0].xy;
+        vec4 color = vec4(0.0);
+        vec2 off1 = vec2(1.3846153846) * dir;
+        vec2 off2 = vec2(3.2307692308) * dir;
+        
+        color += texture2D(source, uv) * 0.2270270270;
+        color += texture2D(source, uv + off1) * 0.3162162162;
+        color += texture2D(source, uv - off1) * 0.3162162162;
+        color += texture2D(source, uv + off2) * 0.0702702703;
+        color += texture2D(source, uv - off2) * 0.0702702703;
+        
+        gl_FragColor = color;
+    }
+)";
+
+const char* blendFrag = R"(
+    uniform sampler2D baseTexture;
+    uniform sampler2D bloomTexture;
+    uniform float multiplier;
+    void main() {
+        vec4 base = texture2D(baseTexture, gl_TexCoord[0].xy);
+        vec4 bloom = texture2D(bloomTexture, gl_TexCoord[0].xy);
+        // Fusión Aditiva: Luz + Luz
+        gl_FragColor = base + (bloom * multiplier);
+    }
+)";
+
 // 1. Arriba de todo, cambiá la grilla para que responda a la resolución
 sf::Texture createGridTexture(int width, int height) {
     sf::RenderTexture rt;
@@ -96,6 +143,33 @@ int main()
         std::cerr << "Pah, te quedaste sin VRAM bo. Falló el RenderTexture." << std::endl;
         return -1;
     }
+
+    // --- SETUP DE BLOOM ---
+    if (!sf::Shader::isAvailable()) {
+        std::cerr << "Pah, tu GPU no banca shaders. Olvidate del neón." << std::endl;
+        return -1;
+    }
+
+    sf::Shader brightnessShader, blurShader, blendShader;
+    brightnessShader.loadFromMemory(brightnessFrag, sf::Shader::Fragment);
+    blurShader.loadFromMemory(blurFrag, sf::Shader::Fragment);
+    blendShader.loadFromMemory(blendFrag, sf::Shader::Fragment);
+
+    // Achicamos a la mitad para el cálculo del brillo. ¡Magia negra para optimizar!
+    unsigned int BLOOM_W = RENDER_WIDTH / 2;
+    unsigned int BLOOM_H = RENDER_HEIGHT / 2;
+    
+    sf::RenderTexture brightnessBuffer, blurBuffer1, blurBuffer2, finalBuffer;
+    brightnessBuffer.create(BLOOM_W, BLOOM_H);
+    blurBuffer1.create(BLOOM_W, BLOOM_H);
+    blurBuffer2.create(BLOOM_W, BLOOM_H);
+    finalBuffer.create(RENDER_WIDTH, RENDER_HEIGHT); // Este es el 4K final que grabamos
+
+    // Variables de control para ImGui
+    bool enableBloom = true;
+    float bloomThreshold = 0.4f; // A partir de qué brillo empieza a generar glow
+    float bloomMultiplier = 1.5f; // Intensidad del neón
+    int blurIterations = 3; // Cuántas pasadas de blur (más = glow más grande)
 
     SoundManager soundManager; 
     PhysicsWorld physics(RENDER_WIDTH, RENDER_HEIGHT, &soundManager);
@@ -281,6 +355,17 @@ int main()
         if (ImGui::Selectable("Global Settings", selectedType == EntityType::Global)) selectedType = EntityType::Global;
         if (ImGui::Selectable("Win Zone", selectedType == EntityType::WinZone)) selectedType = EntityType::WinZone;
         if (ImGui::Selectable("Racers Fleet", selectedType == EntityType::Racers)) selectedType = EntityType::Racers;
+
+        ImGui::Separator();
+            ImGui::TextColored(ImVec4(1, 0.0f, 1, 1), "POST-PROCESSING");
+            ImGui::Checkbox("Enable Neon Bloom", &enableBloom);
+            if (enableBloom) {
+                ImGui::Indent();
+                ImGui::DragFloat("Threshold", &bloomThreshold, 0.05f, 0.0f, 1.0f);
+                ImGui::DragFloat("Intensity", &bloomMultiplier, 0.05f, 0.0f, 5.0f);
+                ImGui::SliderInt("Glow Spread", &blurIterations, 1, 8);
+                ImGui::Unindent();
+            }
 
         ImGui::Separator();
         ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "WALLS");
@@ -732,18 +817,68 @@ int main()
             gameBuffer.draw(rect); 
         }
 
-        gameBuffer.display();
-        recorder.addFrame(gameBuffer.getTexture());
+gameBuffer.display();
 
-        window.clear(); // Un gris oscuro para el fondo del "editor"
+        // 1. Declaramos el sprite acá arriba para que exista en todo este bloque
+        sf::Sprite renderSprite;
 
-        sf::Sprite renderSprite(gameBuffer.getTexture());
-        
-        // Calculamos la escala asumiendo que el RENDER es cuadrado (2160x2160)
+        if (enableBloom) {
+            // 1. EXTRAER BRILLO 
+            brightnessShader.setUniform("source", sf::Shader::CurrentTexture);
+            brightnessShader.setUniform("threshold", bloomThreshold);
+            brightnessBuffer.clear(sf::Color::Black);
+            sf::Sprite brightSprite(gameBuffer.getTexture());
+            brightSprite.setScale(0.5f, 0.5f); 
+            brightnessBuffer.draw(brightSprite, &brightnessShader);
+            brightnessBuffer.display();
+
+            // 2. DESENFOQUE GAUSSIANO 
+            // FIX: Puntero a constante porque getTexture() devuelve const
+            const sf::Texture* currentSource = &brightnessBuffer.getTexture();
+            
+            for (int i = 0; i < blurIterations; ++i) {
+                // Pasada Horizontal
+                blurShader.setUniform("source", sf::Shader::CurrentTexture);
+                blurShader.setUniform("dir", sf::Vector2f(1.0f / BLOOM_W, 0.0f));
+                blurBuffer1.clear(sf::Color::Transparent);
+                blurBuffer1.draw(sf::Sprite(*currentSource), &blurShader);
+                blurBuffer1.display();
+
+                // Pasada Vertical
+                blurShader.setUniform("source", sf::Shader::CurrentTexture);
+                blurShader.setUniform("dir", sf::Vector2f(0.0f, 1.0f / BLOOM_H));
+                blurBuffer2.clear(sf::Color::Transparent);
+                blurBuffer2.draw(sf::Sprite(blurBuffer1.getTexture()), &blurShader);
+                blurBuffer2.display();
+                
+                // FIX: La reasignación ahora funciona perfecto porque el puntero es const
+                currentSource = &blurBuffer2.getTexture();
+            }
+
+            // 3. FUSIÓN ADITIVA 
+            blendShader.setUniform("baseTexture", sf::Shader::CurrentTexture);
+            blendShader.setUniform("bloomTexture", *currentSource);
+            blendShader.setUniform("multiplier", bloomMultiplier);
+            
+            finalBuffer.clear();
+            sf::Sprite finalBaseSprite(gameBuffer.getTexture());
+            finalBuffer.draw(finalBaseSprite, &blendShader);
+            finalBuffer.display();
+
+            recorder.addFrame(finalBuffer.getTexture());
+            renderSprite.setTexture(finalBuffer.getTexture()); // Asignamos textura
+        } else {
+            recorder.addFrame(gameBuffer.getTexture());
+            renderSprite.setTexture(gameBuffer.getTexture()); // Asignamos textura
+        }
+
+        window.clear(sf::Color(20, 20, 20)); 
+
+        // 2. Ahora el resto del código que ya tenías para centrar el viewport
+        // se aplica sobre el renderSprite que ya tiene su textura correcta.
         float scale = DISPLAY_SIZE / (float)RENDER_WIDTH; 
         renderSprite.setScale(scale, scale);
         
-        // Matemática fina para clavar el viewport en el centro de tu monitor
         float offsetX = (desktopMode.width - DISPLAY_SIZE) / 2.0f;
         float offsetY = (desktopMode.height - DISPLAY_SIZE) / 2.0f;
         
