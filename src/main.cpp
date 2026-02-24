@@ -182,8 +182,8 @@ int main()
 
     // Variables de control para ImGui
     bool enableBloom = true;
-    float bloomThreshold = 0.4f; // A partir de qué brillo empieza a generar glow
-    float bloomMultiplier = 1.5f; // Intensidad del neón
+    float bloomThreshold = 0.9f; // A partir de qué brillo empieza a generar glow
+    float bloomMultiplier = 0.5f; // Intensidad del neón
     int blurIterations = 3; // Cuántas pasadas de blur (más = glow más grande)
 
     SoundManager soundManager; 
