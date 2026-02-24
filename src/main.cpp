@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <string>
 #include <deque>
+#include <cstdlib>
 
 #include "Physics/PhysicsWorld.hpp"
 #include "Recorder/Recorder.hpp"
@@ -16,6 +17,17 @@ namespace fs = std::filesystem;
 
 struct Trail {
     std::deque<sf::Vector2f> points;
+    sf::Color color;
+};
+
+struct AmbientParticle {
+    sf::Vector2f basePos;
+    float yPos;
+    float speedY;
+    float phaseOffset;
+    float phaseSpeed;
+    float amplitude;
+    float size;
     sf::Color color;
 };
 
@@ -74,13 +86,12 @@ const char* blendFrag = R"(
 sf::Texture createGridTexture(int width, int height) {
     sf::RenderTexture rt;
     rt.create(width, height);
-    rt.clear(sf::Color(30, 30, 30)); 
+    rt.clear(sf::Color::Transparent); // <--- MAGIA ACÁ: Fondo transparente
     sf::RectangleShape line;
     line.setFillColor(sf::Color(10, 10, 10)); 
     
-    // Si subimos resolución, subimos el grosor y el espacio entre líneas
     float lineThick = (width / 1080.0f) * 2.0f;
-    int stepSize = width / 18; // 18 cortes en total, da igual si es 1080 o 2160
+    int stepSize = width / 18; 
     
     line.setSize(sf::Vector2f(lineThick, (float)height));
     for (int x = 0; x < width; x += stepSize) { 
@@ -227,6 +238,34 @@ int main()
     // Variables de estado de la Interfaz
     EntityType selectedType = EntityType::None;
     int selectedIndex = -1;
+
+    // --- SETUP DE POLVO ATMOSFÉRICO ---
+    // --- SETUP DE POLVO ATMOSFÉRICO REFINADO ---
+    std::vector<AmbientParticle> ambientDust;
+    const int NUM_DUST = 70; // Bajamos la cantidad
+    for (int i = 0; i < NUM_DUST; ++i) {
+        AmbientParticle p;
+        p.basePos.x = (float)(std::rand() % RENDER_WIDTH);
+        p.yPos = (float)(std::rand() % RENDER_HEIGHT);
+        
+        // Más velocidad vertical: de 20 a 60 px/s (antes era 5-30)
+        p.speedY = -((float)(std::rand() % 40) + 20.0f); 
+        
+        p.phaseOffset = (float)(std::rand() % 628) / 100.0f;
+        
+        // Vaivén más rápido: frecuencia de oscilación aumentada
+        p.phaseSpeed = ((float)(std::rand() % 25) + 15.0f) / 10.0f; 
+        
+        // Amplitud mucho mayor: recorren más espacio horizontal (30 a 110 px)
+        p.amplitude = (float)(std::rand() % 80) + 30.0f; 
+        
+        p.size = (float)(std::rand() % 3) + 2.0f;
+        
+        // Mantenemos un alpha bajísimo para que sea un detalle sutil
+        sf::Uint8 alpha = 15 + (std::rand() % 25); 
+        p.color = sf::Color(180, 230, 255, alpha); 
+        ambientDust.push_back(p);
+    }
 
     while (window.isOpen()) {
 
@@ -612,7 +651,42 @@ if (!physics.isPaused) {
         // ==============================================
         // --- DRAW: RENDERIZADO AL BUFFER GIGANTE ---
         // ==============================================
-        gameBuffer.clear(sf::Color(10, 10, 10)); 
+    // 1. Limpiar con el color de vacío
+        gameBuffer.clear(sf::Color(30, 30, 30)); 
+
+        // 2. Dibujar Polvo Atmosférico con movimiento energético
+        sf::VertexArray dustVA(sf::Quads, ambientDust.size() * 4);
+        for(size_t i = 0; i < ambientDust.size(); ++i) {
+            auto& p = ambientDust[i];
+            
+            if (!physics.isPaused || recorder.isRecording) {
+                p.yPos += p.speedY * dtSec;
+                if (p.yPos < -50.0f) { 
+                    p.yPos = RENDER_HEIGHT + 50.0f;
+                    p.basePos.x = (float)(std::rand() % RENDER_WIDTH); 
+                }
+            }
+            
+            // Cálculo del vaivén horizontal
+            float currentX = p.basePos.x + std::sin(globalTime * p.phaseSpeed + p.phaseOffset) * p.amplitude;
+            float s = p.size;
+            
+            dustVA[i*4 + 0].position = sf::Vector2f(currentX - s, p.yPos - s);
+            dustVA[i*4 + 1].position = sf::Vector2f(currentX + s, p.yPos - s);
+            dustVA[i*4 + 2].position = sf::Vector2f(currentX + s, p.yPos + s);
+            dustVA[i*4 + 3].position = sf::Vector2f(currentX - s, p.yPos + s);
+            
+            dustVA[i*4 + 0].color = p.color;
+            dustVA[i*4 + 1].color = p.color;
+            dustVA[i*4 + 2].color = p.color;
+            dustVA[i*4 + 3].color = p.color;
+        }
+
+        sf::RenderStates dustStates;
+        dustStates.blendMode = sf::BlendAdd; // Para que el bloom las "atrape" un poquito
+        gameBuffer.draw(dustVA, dustStates);
+
+        // 3. Dibujar la grilla encima
         gameBuffer.draw(background);
 
         const auto& customWalls = physics.getCustomWalls();
