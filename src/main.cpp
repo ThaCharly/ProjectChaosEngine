@@ -751,33 +751,44 @@ for (size_t j = 1; j < pts.size(); ++j) {
                 float lifePct1 = 1.0f - ((float)(j-1) / (float)pts.size());
                 float lifePct2 = 1.0f - ((float)j / (float)pts.size());
 
-                // MAGIA ACÁ: Factor de ancho para que termine en punta.
-                // Usamos pow() para que la caída de grosor sea suave y no tan lineal.
+                // Anchos afinándose hacia la punta
                 float widthPct1 = std::pow(lifePct1, 0.6f);
                 float widthPct2 = std::pow(lifePct2, 0.6f);
 
                 sf::Color baseColor = trails[i].color;
 
-                // GLOW: Color base transparente
-                sf::Color glowColor1 = baseColor;
-                glowColor1.a = (sf::Uint8)(lifePct1 * 120.0f);
-                sf::Color glowColor2 = baseColor;
-                glowColor2.a = (sf::Uint8)(lifePct2 * 120.0f);
+                // --- MAGIA TERMODINÁMICA ---
+                // Lambda para calcular el color según la "edad" de la estela
+                auto getThermoColor = [&](float life, float alphaMult) -> sf::Color {
+                    sf::Color c;
+                    if (life >= 0.8f) { 
+                        // 0% a 20% de edad: Blanco incandescente (apenas apagado para no quemar)
+                        c = sf::Color(245, 245, 245);
+                    } else if (life >= 0.3f) { 
+                        // 20% a 70% de edad: Transición Blanco -> Color Base
+                        float t = (life - 0.3f) / 0.5f; 
+                        c = lerpColor(baseColor, sf::Color(245, 245, 245), t);
+                    } else { 
+                        // 70% a 100% de edad: Transición Color Base -> Transparente
+                        float t = life / 0.3f; 
+                        sf::Color transparent(0, 0, 0, 0); 
+                        c = lerpColor(transparent, baseColor, t);
+                    }
+                    
+                    // Ajustamos la opacidad para controlar el brillo en el BlendAdd
+                    c.a = (sf::Uint8)(c.a * alphaMult);
+                    return c;
+                };
 
-                // CORE: Blanco brillante mezclado con el color base, clave para reventar el BLOOM
-                sf::Color coreColor1 = sf::Color::White;
-                coreColor1.r = (sf::Uint8)((baseColor.r + 255 * 2) / 3);
-                coreColor1.g = (sf::Uint8)((baseColor.g + 255 * 2) / 3);
-                coreColor1.b = (sf::Uint8)((baseColor.b + 255 * 2) / 3);
-                coreColor1.a = (sf::Uint8)(lifePct1 * 255.0f);
+                // Aplicamos la termodinámica con un poquito menos de nafta
+                // Core: 0.85f (antes 1.0), Glow: 0.35f (antes 0.45)
+                sf::Color coreColor1 = getThermoColor(lifePct1, 0.85f);
+                sf::Color coreColor2 = getThermoColor(lifePct2, 0.85f);
+                
+                sf::Color glowColor1 = getThermoColor(lifePct1, 0.35f);
+                sf::Color glowColor2 = getThermoColor(lifePct2, 0.35f);
 
-                sf::Color coreColor2 = sf::Color::White;
-                coreColor2.r = (sf::Uint8)((baseColor.r + 255 * 2) / 3);
-                coreColor2.g = (sf::Uint8)((baseColor.g + 255 * 2) / 3);
-                coreColor2.b = (sf::Uint8)((baseColor.b + 255 * 2) / 3);
-                coreColor2.a = (sf::Uint8)(lifePct2 * 255.0f);
-
-                // Calculamos los anchos dinámicos multiplicando tus valores por el porcentaje de vida
+                // Calculamos los anchos dinámicos (que terminen en punta)
                 float coreW1 = (baseWidth * 0.3f) * widthPct1;
                 float coreW2 = (baseWidth * 0.3f) * widthPct2;
                 
