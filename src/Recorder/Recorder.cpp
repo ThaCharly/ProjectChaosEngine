@@ -44,23 +44,37 @@ Recorder::~Recorder() {
     stop(); 
 }
 
+void Recorder::addFrame(const sf::Texture& texture) {
+    if (!ffmpegPipe || !isRecording) return;
+    currentFrame++;
+    
+    // Extracción de VRAM a RAM. (Aún frena el hilo, pero es la única copia)
+    sf::Image img = texture.copyToImage();
+
+    // Movemos la imagen a la cola, no copiamos los píxeles
+    {
+        std::lock_guard<std::mutex> lock(queueMutex);
+        frameQueue.push(std::move(img)); 
+    }
+    queueCV.notify_one();
+}
+
 void Recorder::workerLoop() {
     while (true) {
-        std::vector<sf::Uint8> frameData;
+        sf::Image currentImage;
         {
             std::unique_lock<std::mutex> lock(queueMutex);
-            // El hilo se duerme si la cola está vacía, no gasta CPU
             queueCV.wait(lock, [this] { return !frameQueue.empty() || !isWorkerRunning; });
             
-            if (frameQueue.empty() && !isWorkerRunning) break; // Salida limpia
+            if (frameQueue.empty() && !isWorkerRunning) break;
 
-            frameData = std::move(frameQueue.front());
+            currentImage = std::move(frameQueue.front());
             frameQueue.pop();
         }
 
-        // Acá está el cuello de botella que trancaba el juego, ahora corre aislado
+        // Leemos directo del buffer interno de sf::Image en el hilo de FFmpeg
         if (ffmpegPipe) {
-            fwrite(frameData.data(), 1, width * height * 4, ffmpegPipe);
+            fwrite(currentImage.getPixelsPtr(), 1, width * height * 4, ffmpegPipe);
         }
     }
 }
@@ -132,26 +146,6 @@ void Recorder::stop() {
     } else {
         std::cerr << "[REC] Error en la fusion de FFmpeg." << std::endl;
     }
-}
-
-void Recorder::addFrame(const sf::Texture& texture) {
-    if (!ffmpegPipe || !isRecording) return;
-    currentFrame++;
-    
-    // SFML te frena acá para pasar VRAM a RAM, pero es el mínimo mal posible.
-    sf::Image img = texture.copyToImage();
-    const sf::Uint8* pixels = img.getPixelsPtr();
-    size_t dataSize = width * height * 4;
-    
-    // Armamos el buffer crudo
-    std::vector<sf::Uint8> buffer(pixels, pixels + dataSize);
-
-    // Lo empujamos a la cola con candado para que el hilo trabajador lo mastique
-    {
-        std::lock_guard<std::mutex> lock(queueMutex);
-        frameQueue.push(std::move(buffer));
-    }
-    queueCV.notify_one();
 }
 
 void Recorder::addAudioEvent(const sf::Int16* samples, std::size_t sampleCount, float volume) {

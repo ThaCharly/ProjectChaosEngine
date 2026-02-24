@@ -9,6 +9,7 @@
 #include <condition_variable>
 #include <atomic>
 #include <SFML/Graphics.hpp>
+#include <SFML/Graphics/Image.hpp>
 #include <SFML/Audio.hpp> 
 
 class Recorder {
@@ -43,6 +44,6 @@ private:
     std::thread workerThread;
     std::mutex queueMutex;
     std::condition_variable queueCV;
-    std::queue<std::vector<sf::Uint8>> frameQueue;
+    std::queue<sf::Image> frameQueue;
     std::atomic<bool> isWorkerRunning;
 };
