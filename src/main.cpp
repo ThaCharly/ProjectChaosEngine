@@ -885,13 +885,13 @@ gameBuffer.display();
         renderSprite.setPosition(offsetX, offsetY);
 
         // Opcional: Le metemos un marquito sutil al viewport para que se despegue del fondo
-        sf::RectangleShape viewportBorder(sf::Vector2f(DISPLAY_SIZE + 2, DISPLAY_SIZE + 2));
+   /*   sf::RectangleShape viewportBorder(sf::Vector2f(DISPLAY_SIZE + 2, DISPLAY_SIZE + 2));
         viewportBorder.setPosition(offsetX - 1, offsetY - 1);
         viewportBorder.setFillColor(sf::Color::Transparent);
         viewportBorder.setOutlineColor(sf::Color(60, 60, 60));
         viewportBorder.setOutlineThickness(1.0f);
         
-        window.draw(viewportBorder);
+        window.draw(viewportBorder); */
         window.draw(renderSprite);
 
         ImGui::SFML::Render(window);
