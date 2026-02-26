@@ -425,7 +425,7 @@ void PhysicsWorld::saveMap(const std::string& filename) {
     file << "CONFIG " << targetSpeed << " " << currentRacerSize << " " 
          << currentRestitution << " " << enableChaos << " " << stopOnFirstWin << "\n";
     file << "WINZONE " << winZonePos[0] << " " << winZonePos[1] << " " 
-         << winZoneSize[0] << " " << winZoneSize[1] << winZoneGlow << "\n";
+         << winZoneSize[0] << " " << winZoneSize[1] << " " << winZoneGlow << " " << "\n";
 
     for (const auto& w : customWalls) {
         b2Vec2 pos = w.body->GetPosition();
