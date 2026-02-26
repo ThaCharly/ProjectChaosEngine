@@ -427,7 +427,7 @@ if (!physics.isPaused) {
         const auto& walls = physics.getCustomWalls();
         for (int i = 0; i < (int)walls.size(); ++i) {
             std::string label = "Wall " + std::to_string(i);
-            if (walls[i].soundID > 0) label += " [♪]";
+            if (walls[i].soundID > 0) label += " [S]"; // ♪ Indica que tiene sonido asignado
             if (walls[i].isExpandable) label += " [E]";
             if (walls[i].isMoving) label += " [M]";
             if (walls[i].shapeType == 1) label += " [Spike]";
