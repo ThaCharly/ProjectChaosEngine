@@ -165,6 +165,8 @@ int main()
         return -1;
     }
 
+    sf::Font uiFont; uiFont.loadFromFile("../fonts/jetbrains_mono.ttf");
+
     sf::Shader brightnessShader, blurShader, blendShader;
     brightnessShader.loadFromMemory(brightnessFrag, sf::Shader::Fragment);
     blurShader.loadFromMemory(blurFrag, sf::Shader::Fragment);
@@ -522,6 +524,33 @@ if (!physics.isPaused) {
                 changed |= ImGui::DragFloat2("Position", pos, 0.1f);
                 changed |= ImGui::DragFloat2("Size", size, 0.1f, 0.5f, 30.0f);
                 changed |= ImGui::SliderInt("Sound ID", &snd, 0, 8);
+
+                ImGui::Separator();
+                ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "DESTRUCTION SYSTEM");
+                if (ImGui::Checkbox("Is Destructible", &w.isDestructible)) {
+                    if (w.isDestructible) w.currentHits = w.maxHits;
+                }
+
+                if (w.isDestructible) {
+                    ImGui::Indent();
+                    int oldMax = w.maxHits;
+                    if (ImGui::SliderInt("Max Hits", &w.maxHits, 1, 200)) {
+                        // FIX LÓGICO: Si alteramos el máximo, ajustamos la vida actual en caliente.
+                        if (w.currentHits == oldMax) w.currentHits = w.maxHits; 
+                        else if (w.currentHits > w.maxHits) w.currentHits = w.maxHits;
+                    }
+                    
+                    // Slider explícito de vida para control total
+                    ImGui::SliderInt("Current Hits", &w.currentHits, 1, w.maxHits);
+                    
+                    // --- NUEVO: TOGGLE TEXTO / LEDS ---
+                    ImGui::Checkbox("Use Text for HP (Instead of LEDs)", &w.useTextForHP);
+
+                    float healthPct = (float)w.currentHits / (float)w.maxHits;
+                    std::string hpOverlay = std::to_string(w.currentHits) + " / " + std::to_string(w.maxHits);
+                    ImGui::ProgressBar(healthPct, ImVec2(-1, 0), hpOverlay.c_str());
+                    ImGui::Unindent();
+                }
                 
                 if (changed) physics.updateCustomWall(selectedIndex, pos[0], pos[1], size[0], size[1], snd, w.shapeType, w.rotation);
 
@@ -735,6 +764,151 @@ if (!physics.isPaused) {
             shapeToDraw->setOutlineThickness(-thickness);
 
             gameBuffer.draw(*shapeToDraw); 
+
+            // --- RENDERIZADO DE DAÑO Y VIDA ---
+// --- RENDERIZADO DE DAÑO Y VIDA ---
+if (wall.isDestructible) {
+    float halfW = wPx / 2.0f;
+    float halfH = hPx / 2.0f;
+
+    // 1. GRIETAS CONTINUAS Y ESPARCIDAS
+    if (wall.currentHits < wall.maxHits) {
+        int damageLevel = wall.maxHits - wall.currentHits;
+        
+        // Si la pared tiene 200 de vida, limitamos las grietas para no tapar todo el color
+        int numCracks = std::min(damageLevel, 25); 
+        
+        std::srand((unsigned int)(reinterpret_cast<std::uintptr_t>(wall.body) & 0xFFFFFFFF));
+        
+        auto drawCrackSegment = [&](float x1, float y1, float x2, float y2) {
+            float dx = x2 - x1;
+            float dy = y2 - y1;
+            float length = std::sqrt(dx*dx + dy*dy);
+            if (length < 0.5f) return; // Filtro para evitar "basuritas"
+            
+            float crackAngle = std::atan2(dy, dx) * 180.0f / 3.14159f;
+            // Grosor fino y constante (unos 2-3 px reales en pantalla)
+            float crackThickness = std::max(2.0f, 0.015f * physics.SCALE); 
+            
+            sf::RectangleShape crackRect(sf::Vector2f(length, crackThickness));
+            crackRect.setOrigin(0.0f, crackThickness / 2.0f);
+            crackRect.setFillColor(sf::Color(10, 10, 10, 220)); 
+
+            sf::Transform t;
+            t.translate(pos.x * physics.SCALE, pos.y * physics.SCALE);
+            t.rotate(wall.body->GetAngle() * 180.0f / 3.14159f);
+
+            crackRect.setPosition(t.transformPoint(x1, y1));
+            crackRect.setRotation((wall.body->GetAngle() * 180.0f / 3.14159f) + crackAngle);
+            
+            gameBuffer.draw(crackRect);
+        };
+
+        for (int k = 0; k < numCracks; k++) {
+            // AHORA SÍ: nacen distribuidas aleatoriamente por TODA la pared
+            float currentX = (std::rand() % (int)wPx) - halfW;
+            float currentY = (std::rand() % (int)hPx) - halfH;
+            
+            // Dirección general hacia donde viaja la grieta
+            float baseAngle = (std::rand() % 360) * 3.14159f / 180.0f;
+            
+            // Hacemos que la grieta avance en 2 a 4 tramos unidos
+            int segments = 2 + (std::rand() % 3); 
+            for (int s = 0; s < segments; s++) {
+                // Zigzag suave (aprox +/- 45 grados de desviación)
+                float angle = baseAngle + ((std::rand() % 100) - 50) * 0.015f; 
+                
+                // MAGIA ACÁ: Usamos el MAX, no el MIN. Así pueden correr a lo largo de las paredes anchas.
+                float maxDim = std::max(wPx, hPx);
+                float segLen = maxDim * (0.05f + (std::rand() % 100) * 0.002f); // Largo de cada tramo
+                
+                float nextX = currentX + std::cos(angle) * segLen;
+                float nextY = currentY + std::sin(angle) * segLen;
+
+                // Clavamos a los bordes exactos para que no asomen fuera de la luz
+                nextX = std::clamp(nextX, -halfW, halfW);
+                nextY = std::clamp(nextY, -halfH, halfH);
+
+                drawCrackSegment(currentX, currentY, nextX, nextY);
+
+                // Avanzamos el punto para enganchar el siguiente tramo
+                currentX = nextX;
+                currentY = nextY;
+            }
+        }
+        std::srand(std::time(nullptr)); 
+    }
+
+    // 2. INDICADORES: TEXTO O LEDS
+    if (wall.useTextForHP) {
+        sf::Text hitText;
+        hitText.setFont(uiFont); 
+        hitText.setString(std::to_string(wall.currentHits));
+        
+        // ESCALA A PRUEBA DE BALAS: Máximo el 60% del lado más chico
+        float minDim = std::min(wPx, hPx);
+        unsigned int calcSize = (unsigned int)(minDim * 0.6f);
+        if (calcSize < 12) calcSize = 12; // Mínimo de seguridad
+        hitText.setCharacterSize(calcSize); 
+        
+        hitText.setFillColor(sf::Color(255, 255, 255, 140)); 
+        
+        sf::FloatRect textRect = hitText.getLocalBounds();
+        hitText.setOrigin(textRect.left + textRect.width / 2.0f, textRect.top + textRect.height / 2.0f);
+        
+        hitText.setPosition(pos.x * physics.SCALE, pos.y * physics.SCALE);
+        
+        // Si es un pilar vertical, rotamos el número para que encaje mejor
+        float extraRotation = (hPx > wPx * 1.5f) ? 90.0f : 0.0f;
+        hitText.setRotation(wall.body->GetAngle() * 180.0f / 3.14159f + extraRotation);
+        
+        gameBuffer.draw(hitText);
+        
+    } else {
+        // --- MODO LEDS PROCEDURALES ---
+        float ledBaseSize = 0.30f * physics.SCALE; 
+        float spacing = 0.12f * physics.SCALE;
+        
+        bool vertical = (wPx < hPx);
+        float mainLength = vertical ? hPx : wPx;
+        
+        float totalWidth = (wall.maxHits * ledBaseSize) + ((wall.maxHits - 1) * spacing);
+        
+        float scaleDown = 1.0f;
+        if (totalWidth > mainLength * 0.85f) {
+            scaleDown = (mainLength * 0.85f) / totalWidth;
+        }
+        
+        float ledSize = ledBaseSize * scaleDown;
+        float currentSpacing = spacing * scaleDown;
+        float adjustedTotalWidth = (wall.maxHits * ledSize) + ((wall.maxHits - 1) * currentSpacing);
+
+        float startX = vertical ? 0.0f : (-adjustedTotalWidth / 2.0f + ledSize / 2.0f);
+        float startY = vertical ? (-adjustedTotalWidth / 2.0f + ledSize / 2.0f) : 0.0f;
+
+        sf::Transform t;
+        t.translate(pos.x * physics.SCALE, pos.y * physics.SCALE);
+        t.rotate(wall.body->GetAngle() * 180.0f / 3.14159f);
+
+        for (int k = 0; k < wall.maxHits; k++) {
+            sf::RectangleShape led(sf::Vector2f(ledSize, ledSize));
+            led.setOrigin(ledSize / 2.0f, ledSize / 2.0f);
+            
+            float lx = vertical ? startX : (startX + k * (ledSize + currentSpacing));
+            float ly = vertical ? (startY + k * (ledSize + currentSpacing)) : startY;
+
+            led.setPosition(t.transformPoint(lx, ly));
+            led.setRotation(wall.body->GetAngle() * 180.0f / 3.14159f);
+
+            if (k < wall.currentHits) {
+                led.setFillColor(sf::Color(100, 255, 100, 220)); 
+            } else {
+                led.setFillColor(sf::Color(255, 50, 50, 100)); 
+            }
+            gameBuffer.draw(led);
+        }
+    }
+}
 
             b2Body* zone = physics.getWinZoneBody();
             if (zone) {

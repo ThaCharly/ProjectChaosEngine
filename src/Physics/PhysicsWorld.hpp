@@ -69,6 +69,12 @@ struct CustomWall {
     sf::Color baseFillColor = sf::Color(20, 20, 25);
     sf::Color neonColor = sf::Color::White;
     sf::Color flashColor = sf::Color(255, 255, 255);
+
+    bool isDestructible = false;
+    int maxHits = 3;
+    int currentHits = 3;
+    bool pendingDestroy = false;
+    bool useTextForHP = false;
 };
 
 class ChaosContactListener : public b2ContactListener {
@@ -172,6 +178,8 @@ private:
     ChaosContactListener contactListener;
     std::mt19937 rng;
     SoundManager* soundManager; 
+
+    void spawnDebris(const CustomWall& wall);
 
     float worldWidthMeters;
     float worldHeightMeters;

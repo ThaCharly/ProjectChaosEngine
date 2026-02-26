@@ -302,6 +302,42 @@ void PhysicsWorld::updateParticles(float dt) {
     }
 }
 
+void PhysicsWorld::spawnDebris(const CustomWall& wall) {
+    b2Vec2 pos = wall.body->GetPosition();
+    float angle = wall.body->GetAngle();
+    float halfW = wall.width / 2.0f;
+    float halfH = wall.height / 2.0f;
+
+    // Cantidad dinámica según el área de la pared
+    int numParticles = (int)(wall.width * wall.height * 5.0f);
+    if (numParticles < 20) numParticles = 20;
+    if (numParticles > 100) numParticles = 100;
+
+    for (int i = 0; i < numParticles; i++) {
+        Particle p;
+        
+        // 1. Posición aleatoria DENTRO del volumen de la pared
+        float lx = randomFloat(-halfW, halfW);
+        float ly = randomFloat(-halfH, halfH);
+        
+        // 2. Rotamos al espacio del mundo
+        float wx = pos.x + (lx * std::cos(angle) - ly * std::sin(angle));
+        float wy = pos.y + (lx * std::sin(angle) + ly * std::cos(angle));
+
+        p.position = sf::Vector2f(wx * SCALE, wy * SCALE);
+        p.color = wall.neonColor;
+        
+        // 3. Explosión violenta en 360 grados
+        float vAngle = randomFloat(0.0f, 3.141592f * 2.0f);
+        float speed = randomFloat(100.0f, 450.0f); 
+        p.velocity = sf::Vector2f(std::cos(vAngle) * speed, std::sin(vAngle) * speed);
+        
+        p.maxLife = randomFloat(0.4f, 1.2f);
+        p.life = p.maxLife;
+        particles.push_back(p);
+    }
+}
+
 // --- ACTUALIZACIÓN VISUAL Y AUDIO (SIMPLIFICADO) ---
 // --- ACTUALIZACIÓN VISUAL Y AUDIO ---
 void PhysicsWorld::updateWallVisuals(float dt) {
@@ -351,7 +387,22 @@ void PhysicsWorld::updateWallVisuals(float dt) {
                         soundManager->playSound(wall.soundID, 0, 0);
                     }
                 }
+
+                if (wall.isDestructible && wall.currentHits > 0 && !wall.pendingDestroy) {
+                wall.currentHits--;
+                    if (wall.currentHits <= 0) {
+                    wall.pendingDestroy = true; 
+                    }
+                }
             }
+        }
+    }
+
+    // EJECUCIÓN DE DESTRUCCIÓN POST-CÁLCULOS
+    for (int i = (int)customWalls.size() - 1; i >= 0; --i) {
+        if (customWalls[i].pendingDestroy) {
+            spawnDebris(customWalls[i]);
+            removeCustomWall(i); // Borra el Box2D body de forma segura
         }
     }
 
