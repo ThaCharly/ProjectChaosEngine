@@ -481,6 +481,8 @@ if (!physics.isPaused) {
             updateZone |= ImGui::DragFloat2("Pos", physics.winZonePos, 0.1f);
             updateZone |= ImGui::DragFloat2("Size", physics.winZoneSize, 0.1f);
             if (updateZone) physics.updateWinZone(physics.winZonePos[0], physics.winZonePos[1], physics.winZoneSize[0], physics.winZoneSize[1]);
+            
+            ImGui::Checkbox("Enable Neon Pulse (Glow)", &physics.winZoneGlow);
         }
         else if (selectedType == EntityType::Racers) {
             ImGui::TextColored(ImVec4(0.5f, 0.5f, 1.0f, 1), "FLEET SETTINGS");
@@ -776,7 +778,7 @@ if (wall.isDestructible) {
         int damageLevel = wall.maxHits - wall.currentHits;
         
         // Si la pared tiene 200 de vida, limitamos las grietas para no tapar todo el color
-        int numCracks = std::min(damageLevel, 25); 
+        int numCracks = std::min(damageLevel, 200); 
         
         std::srand((unsigned int)(reinterpret_cast<std::uintptr_t>(wall.body) & 0xFFFFFFFF));
         
@@ -788,7 +790,7 @@ if (wall.isDestructible) {
             
             float crackAngle = std::atan2(dy, dx) * 180.0f / 3.14159f;
             // Grosor fino y constante (unos 2-3 px reales en pantalla)
-            float crackThickness = std::max(2.0f, 0.015f * physics.SCALE); 
+            float crackThickness = std::max(4.0f, 0.036f * physics.SCALE); 
             
             sf::RectangleShape crackRect(sf::Vector2f(length, crackThickness));
             crackRect.setOrigin(0.0f, crackThickness / 2.0f);
@@ -916,14 +918,20 @@ if (wall.isDestructible) {
                 sf::RectangleShape zoneRect;
                 float w = physics.winZoneSize[0] * physics.SCALE;
                 float h = physics.winZoneSize[1] * physics.SCALE;
-                float pulse = (std::sin(globalTime * 3.0f) + 1.0f) * 0.5f; 
-                float alpha = 50.0f + pulse * 100.0f;
+                
+                // --- NUEVA LÓGICA DE GLOW GUARDABLE ---
+                float alpha = 100.0f; // Alpha estático por defecto
+                if (physics.winZoneGlow) {
+                    float pulse = (std::sin(globalTime * 1.5f) + 1.0f) * 0.5f; 
+                    alpha = 50.0f + pulse * 100.0f; // Pulso activo
+                }
+                
                 zoneRect.setSize(sf::Vector2f(w, h));
                 zoneRect.setOrigin(w/2.0f, h/2.0f);
                 zoneRect.setPosition(pos.x * physics.SCALE, pos.y * physics.SCALE);
                 zoneRect.setFillColor(sf::Color(255, 215, 0, (sf::Uint8)alpha)); 
                 zoneRect.setOutlineColor(sf::Color::Yellow);
-                zoneRect.setOutlineThickness(0.1f * physics.SCALE); // <--- Relativo
+                zoneRect.setOutlineThickness(0.1f * physics.SCALE); 
                 gameBuffer.draw(zoneRect);
             }
         }

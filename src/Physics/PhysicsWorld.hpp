@@ -152,6 +152,7 @@ public:
 
     float winZonePos[2] = {0.0f, 0.0f};
     float winZoneSize[2] = {2.0f, 2.0f};
+    bool winZoneGlow = true;
 
     void updateWallExpansion(float dt);
     void updateMovingPlatforms(float dt);

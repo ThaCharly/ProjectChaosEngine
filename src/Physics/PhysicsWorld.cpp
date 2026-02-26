@@ -425,7 +425,7 @@ void PhysicsWorld::saveMap(const std::string& filename) {
     file << "CONFIG " << targetSpeed << " " << currentRacerSize << " " 
          << currentRestitution << " " << enableChaos << " " << stopOnFirstWin << "\n";
     file << "WINZONE " << winZonePos[0] << " " << winZonePos[1] << " " 
-         << winZoneSize[0] << " " << winZoneSize[1] << "\n";
+         << winZoneSize[0] << " " << winZoneSize[1] << winZoneGlow << "\n";
 
     for (const auto& w : customWalls) {
         b2Vec2 pos = w.body->GetPosition();
@@ -443,8 +443,6 @@ void PhysicsWorld::saveMap(const std::string& filename) {
              << w.stopOnContact << " "
              << w.stopTargetIdx << " "
              << w.maxSize << " "
-             // --- NUEVOS CAMPOS ---
-// --- NUEVOS CAMPOS ---
              << w.shapeType << " "
              << w.rotation << " "
              << w.isDeadly << " "
@@ -453,7 +451,11 @@ void PhysicsWorld::saveMap(const std::string& filename) {
              << w.pointB.x << " " << w.pointB.y << " "
              << w.moveSpeed << " "
              << w.reverseOnContact << " "
-             << w.freeBounce << "\n";
+             << w.freeBounce << " "
+             << w.isDestructible << " "
+             << w.maxHits << " "
+             << w.currentHits << " "
+             << w.useTextForHP << "\n";
     }
 
     for (size_t i = 0; i < dynamicBodies.size(); ++i) {
@@ -501,11 +503,14 @@ void PhysicsWorld::loadMap(const std::string& filename) {
             float x, y, w, h;
             ss >> x >> y >> w >> h;
             updateWinZone(x, y, w, h);
+
+            bool hasGlow = true;
+            if (ss >> hasGlow) winZoneGlow = hasGlow;
+            else winZoneGlow = true;
         }
         else if (type == "WALL") {
             float x, y, w, h;
             int sid = 0;
-            // 1. Datos básicos
             ss >> x >> y >> w >> h >> sid;
             
             // Creamos la pared (por defecto rectangular y sin rotación)
@@ -554,6 +559,20 @@ void PhysicsWorld::loadMap(const std::string& filename) {
                     if (newWall.isMoving) {
                         newWall.body->SetType(b2_kinematicBody);
                     }
+                }
+                
+                bool isDestr = false;
+                if (ss >> isDestr) {
+                    newWall.isDestructible = isDestr;
+                    
+                    int mHits = 3, cHits = 3;
+                    if (ss >> mHits >> cHits) {
+                        newWall.maxHits = mHits;
+                        newWall.currentHits = cHits;
+                    }
+                    
+                    bool useTxt = false;
+                    if (ss >> useTxt) newWall.useTextForHP = useTxt;
                 }
 
                 updateCustomWall(customWalls.size() - 1, x, y, w, h, sid, sType, rot);
