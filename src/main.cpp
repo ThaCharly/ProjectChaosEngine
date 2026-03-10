@@ -123,7 +123,7 @@ void SoundManager::sendToRecorder(const sf::Int16* samples, std::size_t count, f
 }
 
 // --- MÁQUINA DE ESTADOS PARA LA UI ESTILO UNITY ---
-enum class EntityType { None, Global, WinZone, Racers, Wall };
+enum class EntityType { None, Global, WinZone, Racers, Wall, Knife };
 
 int main()
 {
@@ -166,6 +166,16 @@ int main()
     }
 
     sf::Font uiFont; uiFont.loadFromFile("../fonts/jetbrains_mono.ttf");
+
+    sf::Texture knifeTex;
+    // Si tenés una carpeta assets, meté el PNG ahí con el nombre "knife.png"
+    bool hasKnifeTex = knifeTex.loadFromFile("../assets/knife.png");
+    if (hasKnifeTex) {
+        knifeTex.setSmooth(true);
+        std::cout << ">>> Asset de cuchillo (499x499) cargado joya." << std::endl;
+    } else {
+        std::cout << ">>> No se encontro knife.png, usando hoja por defecto." << std::endl;
+    }
 
     sf::Shader brightnessShader, blurShader, blendShader;
     brightnessShader.loadFromMemory(brightnessFrag, sf::Shader::Fragment);
@@ -437,6 +447,25 @@ if (!physics.isPaused) {
                 selectedIndex = i;
             }
         }
+
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(1, 0.2f, 0.2f, 1), "WEAPONS");
+        ImGui::SameLine(ImGui::GetWindowWidth() - 35);
+        if (ImGui::Button("+##Knife", ImVec2(25, 20))) {
+            physics.addKnife(12.0f, 12.0f); // Spawnea en el medio
+            selectedType = EntityType::Knife;
+            selectedIndex = (int)physics.getKnives().size() - 1;
+        }
+
+        const auto& knives = physics.getKnives();
+        for (int i = 0; i < (int)knives.size(); ++i) {
+            std::string label = "Knife " + std::to_string(i);
+            if (ImGui::Selectable(label.c_str(), selectedType == EntityType::Knife && selectedIndex == i)) {
+                selectedType = EntityType::Knife;
+                selectedIndex = i;
+            }
+        }
+        
         ImGui::End();
 
         // 3. INSPECTOR (Panel Derecho, de arriba a abajo)
@@ -466,6 +495,8 @@ if (!physics.isPaused) {
             ImGui::Checkbox("Gravity", &physics.enableGravity);
             ImGui::Checkbox("Stop on First Win", &physics.stopOnFirstWin);
             ImGui::DragFloat("Finish Delay (s)", &physics.finishDelay, 0.05f, 0.0f, 2.0f);
+
+            
             
             ImGui::Checkbox("Chaos Mode", &physics.enableChaos);
             if (physics.enableChaos) {
@@ -483,6 +514,37 @@ if (!physics.isPaused) {
             if (updateZone) physics.updateWinZone(physics.winZonePos[0], physics.winZonePos[1], physics.winZoneSize[0], physics.winZoneSize[1]);
             
             ImGui::Checkbox("Enable Neon Pulse (Glow)", &physics.winZoneGlow);
+        }
+        else if (selectedType == EntityType::Knife) {
+            if (selectedIndex >= 0 && selectedIndex < physics.getKnives().size()) {
+                auto& k = physics.getKnives()[selectedIndex];
+                
+                ImGui::TextColored(ImVec4(1, 0.2f, 0.2f, 1), "KNIFE %d", selectedIndex);
+                
+                float pos[2] = { k.initialPos.x, k.initialPos.y };
+                if (ImGui::DragFloat2("Position", pos, 0.1f)) {
+                    physics.updateKnifePos(selectedIndex, pos[0], pos[1]);
+                }
+                
+                if (k.isPickedUp) {
+                    ImGui::TextDisabled("Currently held by Racer %d", k.ownerIndex);
+                } else {
+                    ImGui::TextDisabled("Currently on the ground.");
+                }
+
+                ImGui::Separator();
+                ImGui::Spacing();
+                
+                ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor::HSV(0.0f, 0.6f, 0.6f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor::HSV(0.0f, 0.7f, 0.7f));
+                if (ImGui::Button("DELETE KNIFE", ImVec2(-1, 30))) {
+                    physics.removeKnife(selectedIndex);
+                    selectedType = EntityType::None;
+                }
+                ImGui::PopStyleColor(2);
+            } else {
+                selectedType = EntityType::None;
+            }
         }
         else if (selectedType == EntityType::Racers) {
             ImGui::TextColored(ImVec4(0.5f, 0.5f, 1.0f, 1), "FLEET SETTINGS");
@@ -768,13 +830,13 @@ if (!physics.isPaused) {
             gameBuffer.draw(*shapeToDraw); 
 
             // --- RENDERIZADO DE DAÑO Y VIDA ---
-// --- RENDERIZADO DE DAÑO Y VIDA ---
-if (wall.isDestructible) {
-    float halfW = wPx / 2.0f;
-    float halfH = hPx / 2.0f;
+            // --- RENDERIZADO DE DAÑO Y VIDA ---
+            if (wall.isDestructible) {
+                float halfW = wPx / 2.0f;
+                float halfH = hPx / 2.0f;
 
-    // 1. GRIETAS CONTINUAS Y ESPARCIDAS
-    if (wall.currentHits < wall.maxHits) {
+        // 1. GRIETAS CONTINUAS Y ESPARCIDAS
+        if (wall.currentHits < wall.maxHits) {
         int damageLevel = wall.maxHits - wall.currentHits;
         
         // Si la pared tiene 200 de vida, limitamos las grietas para no tapar todo el color
@@ -911,6 +973,70 @@ if (wall.isDestructible) {
         }
     }
 }
+
+        // --- DIBUJO DE CUCHILLOS ---
+        for (const auto& knife : physics.getKnives()) {
+            
+            sf::Vector2f drawPos;
+            float drawRot;
+            float kScale = 1.0f * physics.SCALE; // Tamaño visual base (1 metro en el juego)
+
+            if (!knife.isPickedUp) {
+                // Si está tirado, está en su posición. 
+                // Rotación en 0 (no da vueltas solo) a menos que vos se la setees.
+                drawPos = sf::Vector2f(knife.body->GetPosition().x * physics.SCALE, knife.body->GetPosition().y * physics.SCALE);
+                drawRot = knife.body->GetAngle() * 180.0f / 3.14159f; 
+            } else {
+                // Si alguien lo tiene, lo pegamos al costado/frente del racer
+                int oIdx = knife.ownerIndex;
+                if (oIdx >= 0 && oIdx < bodies.size()) {
+                    b2Body* ownerBody = bodies[oIdx];
+                    b2Vec2 oPos = ownerBody->GetPosition();
+                    float oAngle = ownerBody->GetAngle();
+
+                    // Offset matemático para que parezca que lo lleva en la "mano"
+                    float rSize = physics.currentRacerSize / 2.0f; 
+                    b2Vec2 offset(cos(oAngle) * (rSize + 0.3f), sin(oAngle) * (rSize + 0.3f));
+                    
+                    drawPos = sf::Vector2f((oPos.x + offset.x) * physics.SCALE, (oPos.y + offset.y) * physics.SCALE);
+                    drawRot = oAngle * 180.0f / 3.14159f; // Apunta a donde va el racer
+                } else {
+                    continue; // Por seguridad
+                }
+            }
+
+            // DIBUJO: Asset vs Fallback
+            if (hasKnifeTex) {
+                sf::Sprite s(knifeTex);
+                // Ponemos el origen en el centro del 499x499
+                s.setOrigin(knifeTex.getSize().x / 2.0f, knifeTex.getSize().y / 2.0f);
+                
+                // Escala mágica: Si la imagen es de 499px, queremos que mida kScale (ej: 30px)
+                float scaleFactor = kScale / knifeTex.getSize().x;
+                s.setScale(scaleFactor, scaleFactor);
+                
+                s.setPosition(drawPos);
+                s.setRotation(drawRot);
+                gameBuffer.draw(s);
+            } else {
+                // Fallback: Tu hoja roja
+                sf::ConvexShape tri;
+                tri.setPointCount(3);
+                float triSize = kScale * 0.6f; 
+                tri.setPoint(0, sf::Vector2f(0.0f, -triSize));
+                tri.setPoint(1, sf::Vector2f(triSize/2.0f, triSize/2.0f));
+                tri.setPoint(2, sf::Vector2f(-triSize/2.0f, triSize/2.0f));
+                
+                tri.setPosition(drawPos);
+                // Le sumamos 90 grados para que la punta del triángulo mire hacia donde viaja
+                tri.setRotation(drawRot + 90.0f); 
+                tri.setFillColor(sf::Color(220, 220, 220));
+                tri.setOutlineColor(sf::Color::Red);
+                tri.setOutlineThickness(2.0f);
+                
+                gameBuffer.draw(tri);
+            }
+        }
 
             b2Body* zone = physics.getWinZoneBody();
             if (zone) {

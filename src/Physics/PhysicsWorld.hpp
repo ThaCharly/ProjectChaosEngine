@@ -24,12 +24,31 @@ struct Particle {
     float maxLife;
 };
 
+// --- ESTRUCTURAS DE ARMAS ---
+struct KnifeItem {
+    b2Body* body;
+    b2Vec2 initialPos; // CLAVE: Para saber dónde respawnearlo al reiniciar la carrera
+    bool isPickedUp = false;
+    int ownerIndex = -1; 
+};
+
+struct KnifeEvent {
+    b2Body* racer;
+    b2Body* knife;
+};
+
+struct KillEvent {
+    b2Body* killer;
+    b2Body* victim;
+};
+
 struct RacerStatus {
     bool isAlive = true;
     bool hasFinished = false; // <--- NUEVO
     bool isFinishing = false; // <--- ESTADO NUEVO: Cruzando la meta
     float finishTimer = 0.0f; // <--- CRONÓMETRO
     b2Vec2 deathPos = {0, 0};
+    bool hasKnife = false;
 };
 
 struct CustomWall {
@@ -88,6 +107,9 @@ public:
     SoundManager* soundManager = nullptr;
     float worldWidth = 10.0f; 
 
+    std::vector<KnifeEvent> pendingPickups;
+    std::vector<KillEvent> pendingKills;
+
     void BeginContact(b2Contact* contact) override; 
 };
 
@@ -124,6 +146,16 @@ public:
     void updateWallColor(int wallIndex, int newColorIndex);
 
     float SCALE = 30.0f;
+
+    // MÉTODOS DE LOS CUCHILLOS
+    void addKnife(float x, float y);
+    void removeKnife(int index);
+    void updateKnifePos(int index, float x, float y);
+    void clearKnives();
+    std::vector<KnifeItem>& getKnives() { return knives; }
+
+    int getRacerIndex(b2Body* body) const;
+    int getKnifeIndex(b2Body* body) const;
 
     void updateRacerSize(float newSize);
     void updateRestitution(float newRest);
@@ -179,6 +211,8 @@ private:
     ChaosContactListener contactListener;
     std::mt19937 rng;
     SoundManager* soundManager; 
+
+    std::vector<KnifeItem> knives;
 
     void spawnDebris(const CustomWall& wall);
 

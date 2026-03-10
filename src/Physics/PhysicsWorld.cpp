@@ -10,6 +10,19 @@ void ChaosContactListener::BeginContact(b2Contact* contact) {
     b2Body* bodyA = fa->GetBody();
     b2Body* bodyB = fb->GetBody();
 
+    bool isSensorA = fa->IsSensor();
+    bool isSensorB = fb->IsSensor();
+
+    // DETECTAR PICKUPS
+    if (bodyA->GetType() == b2_dynamicBody && isSensorB) pendingPickups.push_back({bodyA, bodyB});
+    else if (bodyB->GetType() == b2_dynamicBody && isSensorA) pendingPickups.push_back({bodyB, bodyA});
+
+    // DETECTAR CHOQUE RACER vs RACER (ninguno es sensor)
+    if (bodyA->GetType() == b2_dynamicBody && bodyB->GetType() == b2_dynamicBody && !isSensorA && !isSensorB) {
+        pendingKills.push_back({bodyA, bodyB});
+        pendingKills.push_back({bodyB, bodyA}); // Encolamos los dos lados por las dudas
+    }
+
     if (winZoneBody) {
         if (bodyA == winZoneBody && bodyB->GetType() == b2_dynamicBody) bodiesReachedWinZone.insert(bodyB);
         else if (bodyB == winZoneBody && bodyA->GetType() == b2_dynamicBody) bodiesReachedWinZone.insert(bodyA);
@@ -239,6 +252,55 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
             b->SetLinearVelocity(vel);
         }
     }
+
+    // --- RESOLVER PICKUPS ---
+    for (auto& ev : contactListener.pendingPickups) {
+        int rIdx = getRacerIndex(ev.racer);
+        int kIdx = getKnifeIndex(ev.knife);
+
+        if (rIdx != -1 && kIdx != -1) {
+            // Si el racer NO tiene cuchillo y el cuchillo está en el piso
+            if (!racerStatus[rIdx].hasKnife && !knives[kIdx].isPickedUp) {
+                racerStatus[rIdx].hasKnife = true;
+                knives[kIdx].isPickedUp = true;
+                knives[kIdx].ownerIndex = rIdx;
+                knives[kIdx].body->SetEnabled(false); // Desaparece del mundo físico
+            }
+        }
+    }
+    contactListener.pendingPickups.clear();
+
+    // --- RESOLVER KILLS CON CUCHILLO ---
+    for (auto& ev : contactListener.pendingKills) {
+        int killerIdx = getRacerIndex(ev.killer);
+        int victimIdx = getRacerIndex(ev.victim);
+
+        if (killerIdx != -1 && victimIdx != -1) {
+            // Si el asesino tiene el cuchillo y la víctima está viva
+            if (racerStatus[killerIdx].hasKnife && racerStatus[victimIdx].isAlive) {
+                
+                // Matamos a la víctima
+                racerStatus[victimIdx].isAlive = false;
+                racerStatus[victimIdx].deathPos = dynamicBodies[victimIdx]->GetPosition();
+                dynamicBodies[victimIdx]->SetEnabled(false);
+
+                // El asesino suelta el cuchillo
+                racerStatus[killerIdx].hasKnife = false;
+                
+                for (auto& k : knives) {
+                    if (k.ownerIndex == killerIdx) {
+                        k.isPickedUp = false;
+                        k.ownerIndex = -1;
+                        // El cuchillo cae EXACTAMENTE donde mató al otro
+                        k.body->SetTransform(dynamicBodies[killerIdx]->GetPosition(), 0);
+                        k.body->SetEnabled(true);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    contactListener.pendingKills.clear();
 }
 
 void PhysicsWorld::updateParticles(float dt) {
@@ -458,6 +520,10 @@ void PhysicsWorld::saveMap(const std::string& filename) {
              << w.useTextForHP << "\n";
     }
 
+    for (const auto& k : knives) {
+        file << "KNIFE " << k.initialPos.x << " " << k.initialPos.y << "\n";
+    }
+
     for (size_t i = 0; i < dynamicBodies.size(); ++i) {
         b2Body* b = dynamicBodies[i];
         b2Vec2 pos = b->GetPosition();
@@ -580,6 +646,12 @@ void PhysicsWorld::loadMap(const std::string& filename) {
             }
         }
 
+        else if (type == "KNIFE") {
+            float x, y;
+            ss >> x >> y;
+            addKnife(x, y);
+        }
+
         else if (type == "RACER") { 
             int id; float x, y, vx, vy, a, av;
             ss >> id >> x >> y >> vx >> vy >> a >> av;
@@ -700,6 +772,60 @@ void PhysicsWorld::addCustomWall(float x, float y, float w, float h, int soundID
     );
 
     customWalls.push_back(newWall);
+}
+
+int PhysicsWorld::getRacerIndex(b2Body* body) const {
+    for (size_t i = 0; i < dynamicBodies.size(); ++i) {
+        if (dynamicBodies[i] == body) return (int)i;
+    }
+    return -1;
+}
+
+int PhysicsWorld::getKnifeIndex(b2Body* body) const {
+    for (size_t i = 0; i < knives.size(); ++i) {
+        if (knives[i].body == body) return (int)i;
+    }
+    return -1;
+}
+
+void PhysicsWorld::addKnife(float x, float y) {
+    b2BodyDef bd;
+    bd.type = b2_staticBody; // Estático para que no ruede ni tenga física real de peso
+    bd.position.Set(x, y);
+    
+    b2Body* body = world.CreateBody(&bd);
+    
+    b2PolygonShape shape;
+    shape.SetAsBox(0.4f, 0.4f); // Hitbox del item
+    
+    b2FixtureDef fd;
+    fd.shape = &shape;
+    fd.isSensor = true; // Lo hace atravesable
+    body->CreateFixture(&fd);
+    
+    KnifeItem knife;
+    knife.body = body;
+    knife.initialPos = b2Vec2(x, y); // Guardamos dónde nació
+    knives.push_back(knife);
+}
+
+void PhysicsWorld::removeKnife(int index) {
+    if (index < 0 || index >= knives.size()) return;
+    world.DestroyBody(knives[index].body);
+    knives.erase(knives.begin() + index);
+}
+
+void PhysicsWorld::updateKnifePos(int index, float x, float y) {
+    if (index < 0 || index >= knives.size()) return;
+    knives[index].initialPos.Set(x, y);
+    knives[index].body->SetTransform(b2Vec2(x, y), 0);
+}
+
+void PhysicsWorld::clearKnives() {
+    for (auto& k : knives) {
+        if (k.body) world.DestroyBody(k.body);
+    }
+    knives.clear();
 }
 
 void PhysicsWorld::updateWallColor(int index, int newColorIndex) {
@@ -1005,6 +1131,14 @@ for(auto& status : racerStatus) {
         status.hasFinished = false;
         status.isFinishing = false; // <---
         status.finishTimer = 0.0f;  // <---
+        status.hasKnife = false;     // <---
+    }
+
+    for(auto& k : knives) {
+        k.isPickedUp = false;
+        k.ownerIndex = -1;
+        k.body->SetTransform(k.initialPos, 0); // Vuelve al spawn original
+        k.body->SetEnabled(true);
     }
 
     int i = 0; 
