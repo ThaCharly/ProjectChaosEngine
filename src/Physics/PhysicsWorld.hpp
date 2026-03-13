@@ -30,6 +30,7 @@ struct KnifeItem {
     b2Vec2 initialPos; // CLAVE: Para saber dónde respawnearlo al reiniciar la carrera
     bool isPickedUp = false;
     int ownerIndex = -1; 
+    float cooldownTimer = 0.0f;
 };
 
 struct KnifeEvent {

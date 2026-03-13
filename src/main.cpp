@@ -979,7 +979,7 @@ if (!physics.isPaused) {
             
             sf::Vector2f drawPos;
             float drawRot;
-            float kScale = 1.0f * physics.SCALE; // Tamaño visual base (1 metro en el juego)
+            float kScale = 1.5f * physics.SCALE; // Tamaño visual base (1 metro en el juego)
 
             if (!knife.isPickedUp) {
                 // Si está tirado, está en su posición. 
@@ -1013,7 +1013,7 @@ if (!physics.isPaused) {
                 
                 // Escala mágica: Si la imagen es de 499px, queremos que mida kScale (ej: 30px)
                 float scaleFactor = kScale / knifeTex.getSize().x;
-                s.setScale(scaleFactor, scaleFactor);
+                s.setScale(-scaleFactor, scaleFactor);
                 
                 s.setPosition(drawPos);
                 s.setRotation(drawRot);

@@ -96,6 +96,13 @@ float PhysicsWorld::randomFloat(float min, float max) {
 void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
     if (isPaused || gameOver) return;
 
+    // --- BAJAR COOLDOWN DE LOS CUCHILLOS ---
+    for (auto& k : knives) {
+        if (k.cooldownTimer > 0.0f) {
+            k.cooldownTimer -= timeStep;
+        }
+    }
+
     world.SetGravity(enableGravity ? b2Vec2(0.0f, 9.8f) : b2Vec2(0.0f, 0.0f));
     
     contactListener.bodiesToCheck.clear();
@@ -254,17 +261,18 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
     }
 
     // --- RESOLVER PICKUPS ---
+// --- RESOLVER PICKUPS ---
     for (auto& ev : contactListener.pendingPickups) {
         int rIdx = getRacerIndex(ev.racer);
         int kIdx = getKnifeIndex(ev.knife);
 
         if (rIdx != -1 && kIdx != -1) {
-            // Si el racer NO tiene cuchillo y el cuchillo está en el piso
-            if (!racerStatus[rIdx].hasKnife && !knives[kIdx].isPickedUp) {
+            // ACÁ AGREGAMOS LA CONDICIÓN DEL COOLDOWN:
+            if (!racerStatus[rIdx].hasKnife && !knives[kIdx].isPickedUp && knives[kIdx].cooldownTimer <= 0.0f) {
                 racerStatus[rIdx].hasKnife = true;
                 knives[kIdx].isPickedUp = true;
                 knives[kIdx].ownerIndex = rIdx;
-                knives[kIdx].body->SetEnabled(false); // Desaparece del mundo físico
+                knives[kIdx].body->SetEnabled(false); 
             }
         }
     }
@@ -291,7 +299,8 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
                     if (k.ownerIndex == killerIdx) {
                         k.isPickedUp = false;
                         k.ownerIndex = -1;
-                        // El cuchillo cae EXACTAMENTE donde mató al otro
+                        k.cooldownTimer = 0.2f; // <--- ACÁ LE CLAVAMOS EL SEGUNDO DE COOLDOWN
+                        
                         k.body->SetTransform(dynamicBodies[killerIdx]->GetPosition(), 0);
                         k.body->SetEnabled(true);
                         break;
@@ -796,7 +805,7 @@ void PhysicsWorld::addKnife(float x, float y) {
     b2Body* body = world.CreateBody(&bd);
     
     b2PolygonShape shape;
-    shape.SetAsBox(0.4f, 0.4f); // Hitbox del item
+    shape.SetAsBox(0.5f, 0.5f); // Hitbox del item
     
     b2FixtureDef fd;
     fd.shape = &shape;
