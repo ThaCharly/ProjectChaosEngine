@@ -121,9 +121,11 @@ void Recorder::addFrame(const sf::Texture& texture) {
             std::vector<sf::Uint8> buffer(ptr, ptr + dataSize);
             my_glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
 
-            // Lo mandamos al hilo esclavo de FFmpeg
+            // Lo mandamos al hilo esclavo de FFmpeg con BACKPRESSURE
             {
-                std::lock_guard<std::mutex> lock(queueMutex);
+                std::unique_lock<std::mutex> lock(queueMutex);
+                // Si la cola llega al máximo, pausamos la simulación hasta que FFmpeg libere espacio
+                queueSpaceCV.wait(lock, [this] { return frameQueue.size() < MAX_QUEUE_SIZE; });
                 frameQueue.push(std::move(buffer));
             }
             queueCV.notify_one();
@@ -146,7 +148,7 @@ void Recorder::addFrame(const sf::Texture& texture) {
 
 void Recorder::workerLoop() {
     while (true) {
-        std::vector<sf::Uint8> currentFrameData; // <--- AHORA SÍ ESPERAMOS UN VECTOR
+        std::vector<sf::Uint8> currentFrameData; 
         {
             std::unique_lock<std::mutex> lock(queueMutex);
             queueCV.wait(lock, [this] { return !frameQueue.empty() || !isWorkerRunning; });
@@ -156,10 +158,13 @@ void Recorder::workerLoop() {
             currentFrameData = std::move(frameQueue.front());
             frameQueue.pop();
         }
+        
+        // ¡AVISAMOS AL HILO PRINCIPAL QUE HAY LUGAR EN LA RAM!
+        queueSpaceCV.notify_one(); 
 
         // Leemos directo de la memoria contigua del vector para escupirlo a FFmpeg
         if (ffmpegPipe) {
-            fwrite(currentFrameData.data(), 1, width * height * 4, ffmpegPipe); // <--- Usamos .data()
+            fwrite(currentFrameData.data(), 1, width * height * 4, ffmpegPipe); 
         }
     }
 }

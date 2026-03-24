@@ -44,8 +44,11 @@ private:
     std::thread workerThread;
     std::mutex queueMutex;
     std::condition_variable queueCV;
+    std::condition_variable queueSpaceCV;
     std::queue<std::vector<sf::Uint8>> frameQueue;
     std::atomic<bool> isWorkerRunning;
+
+    const size_t MAX_QUEUE_SIZE = 480; // 60 son aproximadamente 1.1GB de RAM, 480 son 8.8GB
 
     // --- PBOs (Pixel Buffer Objects) ---
     GLuint pbo[2];
