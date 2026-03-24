@@ -279,6 +279,9 @@ int main()
         ambientDust.push_back(p);
     }
 
+    bool isDragging = false;
+    b2Vec2 dragOffset(0.0f, 0.0f);
+
     while (window.isOpen()) {
 
         sf::Event event;
@@ -289,6 +292,71 @@ int main()
         }
 
         ImGui::SFML::Update(window, deltaClock.restart());
+
+        // ==========================================
+        // SISTEMA DE PICKING Y DRAG & DROP
+        // ==========================================
+        ImGuiIO& io = ImGui::GetIO();
+        
+        // Solo procesamos clics en el mundo si el mouse NO está sobre una ventana de ImGui
+        if (!io.WantCaptureMouse) {
+            
+            // Calculamos los mismos offsets de tu renderizado para la inversa
+            float scale = DISPLAY_SIZE / (float)RENDER_WIDTH; 
+            float offsetX = (desktopMode.width - DISPLAY_SIZE) / 2.0f;
+            float offsetY = (desktopMode.height - DISPLAY_SIZE) / 2.0f;
+
+            if (sf::Mouse::isButtonPressed(sf::Mouse::Left)) {
+                sf::Vector2i mousePos = sf::Mouse::getPosition(window);
+
+                // 1. Llevamos el Mouse (Pantalla) -> Buffer 4K
+                float bufferX = (mousePos.x - offsetX) / scale;
+                float bufferY = (mousePos.y - offsetY) / scale;
+
+                // 2. Llevamos el Buffer 4K -> Metros en Box2D
+                float box2dX = bufferX / physics.SCALE;
+                float box2dY = bufferY / physics.SCALE;
+
+                if (!isDragging) {
+                    // --- FASE DE SELECCIÓN (CLICK INICIAL) ---
+                    int clickedWall = physics.getWallAtPoint(box2dX, box2dY);
+                    
+                    if (clickedWall != -1) {
+                        // Seleccionamos en la UI automáticamente!
+                        selectedType = EntityType::Wall;
+                        selectedIndex = clickedWall;
+                        isDragging = true;
+                        
+                        // Calculamos el offset para no agarrar el objeto siempre desde el centro
+                        b2Vec2 objPos = physics.getCustomWalls()[clickedWall].body->GetPosition();
+                        dragOffset = b2Vec2(box2dX - objPos.x, box2dY - objPos.y);
+                    } else {
+                        // Clic al vacío, deseleccionamos
+                        selectedType = EntityType::None;
+                        selectedIndex = -1;
+                    }
+                } else {
+                    // --- FASE DE ARRASTRE ---
+                    if (selectedType == EntityType::Wall && selectedIndex >= 0 && selectedIndex < physics.getCustomWalls().size()) {
+                        float newX = box2dX - dragOffset.x;
+                        float newY = box2dY - dragOffset.y;
+                        
+                        // Movemos el cuerpo físico. Como la UI lee GetPosition() de Box2D, 
+                        // los sliders se van a mover solos como por arte de magia.
+                        physics.getCustomWalls()[selectedIndex].body->SetTransform(
+                            b2Vec2(newX, newY), 
+                            physics.getCustomWalls()[selectedIndex].rotation
+                        );
+                        
+                        // Despertamos el cuerpo por si estaba dormido (optimización de Box2D)
+                        physics.getCustomWalls()[selectedIndex].body->SetAwake(true);
+                    }
+                }
+            } else {
+                // Soltamos el clic
+                isDragging = false;
+            }
+        }
 
         sf::Time dt = clock.restart();
         float dtSec = dt.asSeconds();

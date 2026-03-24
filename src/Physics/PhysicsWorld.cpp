@@ -312,6 +312,19 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
     contactListener.pendingKills.clear();
 }
 
+int PhysicsWorld::getWallAtPoint(float x, float y) {
+    b2Vec2 point(x, y);
+    for (size_t i = 0; i < customWalls.size(); ++i) {
+        // Obtenemos la forma física del cuerpo
+        b2Fixture* fixture = customWalls[i].body->GetFixtureList();
+        // Le preguntamos a Box2D si el punto está dentro del polígono
+        if (fixture && fixture->TestPoint(point)) {
+            return (int)i; // Retorna el índice de la pared seleccionada
+        }
+    }
+    return -1; // No tocamos nada
+}
+
 void PhysicsWorld::updateParticles(float dt) {
     if (isPaused) return;
 

@@ -192,6 +192,7 @@ public:
 
     void loadSong(const std::string& filename);
     bool isSongLoaded = false;
+    int getWallAtPoint(float x, float y);
 
 private:
     std::vector<int> songNotes;
