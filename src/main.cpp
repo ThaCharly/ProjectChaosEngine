@@ -8,6 +8,7 @@
 #include <string>
 #include <deque>
 #include <cstdlib>
+#include <memory>
 
 #include "Physics/PhysicsWorld.hpp"
 #include "Recorder/Recorder.hpp"
@@ -15,8 +16,13 @@
 
 namespace fs = std::filesystem;
 
+struct TrailPoint {
+    sf::Vector2f pos;
+    float time;
+};
+
 struct Trail {
-    std::deque<sf::Vector2f> points;
+    std::deque<TrailPoint> points;
     sf::Color color;
 };
 
@@ -130,12 +136,15 @@ int main()
     const unsigned int RENDER_WIDTH = 2160;
     const unsigned int RENDER_HEIGHT = 2160;
     const float DISPLAY_SIZE = 900.0f;
-    const unsigned int FPS = 60;
+ //   const unsigned int FPS = 60;
     const std::string VIDEO_DIRECTORY = "../output/video.mp4";
+
+    int simFPS = 60;
+    int recordFPS = 60;
 
     sf::VideoMode desktopMode = sf::VideoMode::getDesktopMode();
     sf::RenderWindow window(desktopMode, "ChaosEngine - Neon Lab", sf::Style::Fullscreen);
-    window.setFramerateLimit(FPS);
+    window.setFramerateLimit(simFPS);
 
     if (!ImGui::SFML::Init(window)) return -1;
 
@@ -198,6 +207,7 @@ int main()
     float bloomMultiplier = 0.5f; // Intensidad del neón
     int blurIterations = 3; // Cuántas pasadas de blur (más = glow más grande)
 
+    std::unique_ptr<Recorder> recorder = nullptr;
     SoundManager soundManager; 
     PhysicsWorld physics(RENDER_WIDTH, RENDER_HEIGHT, &soundManager);
     physics.isPaused = true; 
@@ -206,10 +216,6 @@ int main()
     fs::path videoPath(VIDEO_DIRECTORY);
     fs::path outputDir = videoPath.parent_path();
     if (!fs::exists(outputDir)) fs::create_directories(outputDir);
-
-    Recorder recorder(RENDER_WIDTH, RENDER_HEIGHT, FPS, VIDEO_DIRECTORY);
-    recorder.isRecording = false; 
-    soundManager.setRecorder(&recorder);
 
     const float timeStep = 1.0f / 60.0f;
     int32 velIter = 8;
@@ -578,28 +584,29 @@ auto toLocal = [&](b2Vec2 global, b2Vec2 objPos, float angle) -> b2Vec2 {
             }
         }
 
-        sf::Time dt = clock.restart();
+sf::Time dt = clock.restart();
         float dtSec = dt.asSeconds();
-
-        // --- FIX DE SINCRONIZACIÓN PARA 4K PERFECTO ---
-        if (recorder.isRecording) {
-            // Le clavamos el tiempo exacto. No importa si la GPU demora,
-            // para el motor y el video SIEMPRE pasaron 16.6ms por ciclo.
-            dtSec = timeStep;
-        }
         
+        float timeStep = 1.0f / (float)simFPS; // Paso dinámico para tiempo real
+
+        if (recorder && recorder->isRecording) {
+            // Override absoluto: Clavamos el tiempo a la frecuencia de grabación
+            dtSec = 1.0f / (float)recordFPS;
+            timeStep = dtSec; 
+        }
+
         physics.updateWallVisuals(dtSec);
         physics.updateParticles(dtSec);
         globalTime += dtSec;
 
         if (!physics.isPaused) {
-            if (recorder.isRecording) {
-                // MODO GRABACIÓN: 1 Frame de Video = 1 Step de Física. (Chau acumulador)
+            if (recorder && recorder->isRecording) {
+                // Grabando: Avanza la física fotograma a fotograma como reloj suizo
                 physics.step(timeStep, velIter, posIter);
                 physics.updateWallExpansion(timeStep);
                 physics.updateMovingPlatforms(timeStep);
             } else {
-                // MODO TIEMPO REAL: Usamos el acumulador para compensar tironcitos normales
+                // Tiempo Real: El acumulador te salva de cualquier lagazo
                 accumulator += dtSec;
                 while (accumulator >= timeStep) {
                     physics.step(timeStep, velIter, posIter);
@@ -617,12 +624,19 @@ if (!physics.isPaused) {
                 if (i >= trails.size()) break;
                 b2Vec2 pos = bodies[i]->GetPosition();
                 sf::Vector2f p(pos.x * physics.SCALE, pos.y * physics.SCALE);
-                trails[i].points.push_front(p);
+                
+                trails[i].points.push_front({p, globalTime});
+                
                 float speed = bodies[i]->GetLinearVelocity().Length();
                 
-                // >>> ESTELAS MÁS CORTAS ACÁ <<<
-                size_t maxPoints = (size_t)(speed * 1.5f) + 5; 
-                if (trails[i].points.size() > maxPoints) trails[i].points.pop_back();
+                // Mantenemos la longitud visual exacta calculando el tiempo de vida
+                // (speed * 1.5 + 5) eran los frames a 60 FPS. Lo pasamos a segundos:
+                float targetDuration = ((speed * 1.5f) + 5.0f) / 60.0f;
+                
+                // Purgamos la memoria limpiando puntos viejos en base al reloj global, NO a la cantidad.
+                while (!trails[i].points.empty() && (globalTime - trails[i].points.back().time) > targetDuration) {
+                    trails[i].points.pop_back();
+                }
             }
         }
 
@@ -634,7 +648,7 @@ if (!physics.isPaused) {
             victoryTimer += dtSec;
             if (victoryTimer >= VICTORY_DELAY) {
                 std::cout << ">>> CLOSING SIMULATION." << std::endl;
-                recorder.stop(); 
+                if (recorder) recorder->stop(); 
                 window.close();
             }
         }
@@ -650,19 +664,36 @@ if (!physics.isPaused) {
         ImGui::SetNextWindowSize(ImVec2(desktopMode.width - (panelWidth * 2), 65), ImGuiCond_Always);
         ImGui::Begin("Toolbar", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoMove);
 
-        if (recorder.isRecording) {
+        if (recorder && recorder->isRecording) {
             ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor::HSV(0.0f, 0.6f, 0.6f));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor::HSV(0.0f, 0.7f, 0.7f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, (ImVec4)ImColor::HSV(0.0f, 0.8f, 0.8f));
-            if (ImGui::Button("STOP REC", ImVec2(100, 40))) recorder.isRecording = false;
+            if (ImGui::Button("STOP REC", ImVec2(100, 40))) {
+                recorder->stop();
+                recorder.reset(); // Destruye el objeto y libera la VRAM
+            }
             ImGui::PopStyleColor(3);
         } else {
             ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor::HSV(0.33f, 0.6f, 0.6f));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor::HSV(0.33f, 0.7f, 0.7f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, (ImVec4)ImColor::HSV(0.33f, 0.8f, 0.8f));
-            if (ImGui::Button("START REC", ImVec2(100, 40))) recorder.isRecording = true;
+            if (ImGui::Button("START REC", ImVec2(100, 40))) {
+                recorder = std::make_unique<Recorder>(RENDER_WIDTH, RENDER_HEIGHT, recordFPS, VIDEO_DIRECTORY);
+                soundManager.setRecorder(recorder.get());
+                recorder->isRecording = true;
+            }
             ImGui::PopStyleColor(3);
         }
+
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(120);
+        if (ImGui::SliderInt("Sim FPS", &simFPS, 30, 240)) {
+            window.setFramerateLimit(simFPS);
+        }
+        
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(120);
+        ImGui::SliderInt("Rec FPS", &recordFPS, 30, 240);
 
         ImGui::SameLine();
         ImGui::SetCursorPosY(15);
@@ -1055,7 +1086,7 @@ if (!physics.isPaused) {
         for(size_t i = 0; i < ambientDust.size(); ++i) {
             auto& p = ambientDust[i];
             
-            if (!physics.isPaused || recorder.isRecording) {
+            if (!physics.isPaused || (recorder && recorder->isRecording)) {
                 p.yPos += p.speedY * dtSec;
                 if (p.yPos < -50.0f) { 
                     p.yPos = RENDER_HEIGHT + 50.0f;
@@ -1225,9 +1256,12 @@ if (!physics.isPaused) {
                     sf::VertexArray coreVA(sf::Quads);
                     float baseWidth = physics.currentRacerSize * physics.SCALE; 
 
-                    for (size_t j = 1; j < pts.size(); ++j) {
-                        sf::Vector2f p1 = pts[j-1];
-                        sf::Vector2f p2 = pts[j];
+// Dentro del for de dibujado de estelas:
+        for (size_t j = 1; j < pts.size(); ++j) {
+            // Agregá ".pos" porque ahora es una estructura compuesta
+            sf::Vector2f p1 = pts[j-1].pos; 
+            sf::Vector2f p2 = pts[j].pos;
+            // ... el resto de la matemática queda todo exactamente igual.
 
                         sf::Vector2f dir = p2 - p1;
                         float len = std::sqrt(dir.x*dir.x + dir.y*dir.y);
@@ -1665,10 +1699,10 @@ if (!physics.isPaused) {
             finalBuffer.draw(finalBaseSprite, &blendShader);
             finalBuffer.display();
 
-            recorder.addFrame(finalBuffer.getTexture());
+            if (recorder && recorder->isRecording) recorder->addFrame(finalBuffer.getTexture());
             renderSprite.setTexture(finalBuffer.getTexture()); // Asignamos textura
         } else {
-            recorder.addFrame(gameBuffer.getTexture());
+            if (recorder && recorder->isRecording) recorder->addFrame(gameBuffer.getTexture());
             renderSprite.setTexture(gameBuffer.getTexture()); // Asignamos textura
         }
 
