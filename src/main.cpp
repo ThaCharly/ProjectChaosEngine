@@ -13,6 +13,7 @@
 #include "Physics/PhysicsWorld.hpp"
 #include "Recorder/Recorder.hpp"
 #include "Sound/SoundManager.hpp" 
+#include "Utils/InputManager.hpp"
 
 namespace fs = std::filesystem;
 
@@ -136,7 +137,6 @@ int main()
 {
     const unsigned int RENDER_WIDTH = 2160;
     const unsigned int RENDER_HEIGHT = 2160;
-    const float DISPLAY_SIZE = 900.0f;
  //   const unsigned int FPS = 60;
     const std::string VIDEO_DIRECTORY = "../output/video.mp4";
 
@@ -148,6 +148,13 @@ int main()
     window.setFramerateLimit(simFPS);
 
     if (!ImGui::SFML::Init(window)) return -1;
+
+    // --- ESCALADO PARA MÓVILES (Fat Finger UX) ---
+    bool isMobile = (desktopMode.width < 800);
+    if (isMobile) {
+        ImGui::GetStyle().ScaleAllSizes(2.0f);
+        ImGui::GetIO().FontGlobalScale = 2.0f;
+    }
 
     // --- ESTILO IMGUI TIPO MOTOR GRÁFICO ---
     ImGuiStyle& style = ImGui::GetStyle();
@@ -305,6 +312,8 @@ int main()
     bool isHoveringRotate = false;
     bool isHoveringMove = false;
 
+    InputManager inputManager; // <-- ACÁ
+
     while (window.isOpen()) {
 
         sf::Event event;
@@ -314,35 +323,73 @@ int main()
             if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::Escape) window.close();
         }
 
+        if (event.type == sf::Event::Resized) {
+                sf::FloatRect visibleArea(0, 0, event.size.width, event.size.height);
+                window.setView(sf::View(visibleArea));
+            }
+
         ImGui::SFML::Update(window, deltaClock.restart());
 
 // ==========================================
         // SISTEMA DE PICKING Y GIZMOS (MOVE, ROTATE, SCALE x4)
         // ==========================================
-        ImGuiIO& io = ImGui::GetIO();
+        // ==========================================
+        // SISTEMA DE PICKING Y GIZMOS (MOVE, ROTATE, SCALE x4)
+        // ==========================================
+ImGuiIO& io = ImGui::GetIO();
         
+        // 1. Leemos la verdad absoluta desde SFML, no desde ImGui
+        sf::Vector2u winSize = window.getSize();
+        
+        // EL FIX DEFINITIVO: Obligamos a la cámara de SFML a calzar 1:1 con la ventana física CADA FRAME.
+        // Esto mata cualquier estiramiento o recorte que haga el SO por atrás.
+        window.setView(sf::View(sf::FloatRect(0.0f, 0.0f, (float)winSize.x, (float)winSize.y)));
+
+        float screenWidth = (float)winSize.x;
+        float screenHeight = (float)winSize.y;
+        isMobile = (screenWidth < 800.0f); // Refresco dinámico
+
+        float leftPanelWidth = isMobile ? screenWidth : screenWidth * 0.15f; 
+        float rightPanelWidth = isMobile ? screenWidth : screenWidth * 0.20f;
+        float toolbarHeight = isMobile ? 80.0f : 65.0f; 
+
+        // MAGIA ANTI-CORTE: 20 píxeles de margen (padding) para que el SO no te coma la pared 0
+        float safePadding = 20.0f;
+        
+        float availableWidth = (isMobile ? screenWidth : (screenWidth - leftPanelWidth - rightPanelWidth)) - (safePadding * 2.0f);
+        float availableHeight = screenHeight - toolbarHeight - (safePadding * 2.0f);
+
+        // Escalar manteniendo el Aspect Ratio exacto
+        float scaleBase = std::min(availableWidth / RENDER_WIDTH, availableHeight / RENDER_HEIGHT);
+        
+        // Calculamos el offset final empujándolo con el safePadding
+        float offsetX = (isMobile ? 0.0f : leftPanelWidth) + safePadding + (availableWidth - (RENDER_WIDTH * scaleBase)) / 2.0f;
+        float offsetY = toolbarHeight + safePadding + (availableHeight - (RENDER_HEIGHT * scaleBase)) / 2.0f;
+
         // Reseteamos el estado visual frame a frame
         hoveredScaleCorner = -1;
         isHoveringRotate = false;
         isHoveringMove = false;
 
-        if (!io.WantCaptureMouse) {
-            float scale = DISPLAY_SIZE / (float)RENDER_WIDTH; 
-            float offsetX = (desktopMode.width - DISPLAY_SIZE) / 2.0f;
-            float offsetY = (desktopMode.height - DISPLAY_SIZE) / 2.0f;
+        inputManager.update(window, io.WantCaptureMouse);
+        const auto& ptr = inputManager.getPointer();
 
-            sf::Vector2i mousePos = sf::Mouse::getPosition(window);
-            float bufferX = (mousePos.x - offsetX) / scale;
-            float bufferY = (mousePos.y - offsetY) / scale;
+        if (!ptr.handledByUI) {
+            float bufferX = (ptr.position.x - offsetX) / scaleBase;
+            float bufferY = (ptr.position.y - offsetY) / scaleBase;
             float box2dX = bufferX / physics.SCALE;
             float box2dY = bufferY / physics.SCALE;
             b2Vec2 mouseB2(box2dX, box2dY);
+
+            // Tolerancias dinámicas para dedos (móvil) o mouse (PC)
+            float gizmoTolerance = isMobile ? 3.0f : 1.2f; 
+            float movePadding = isMobile ? 2.0f : 0.8f;
 
             auto toGlobal = [&](b2Vec2 local, b2Vec2 objPos, float angle) -> b2Vec2 {
                 float c = std::cos(angle); float s = std::sin(angle);
                 return b2Vec2(objPos.x + local.x * c - local.y * s, objPos.y + local.x * s + local.y * c);
             };
-auto toLocal = [&](b2Vec2 global, b2Vec2 objPos, float angle) -> b2Vec2 {
+            auto toLocal = [&](b2Vec2 global, b2Vec2 objPos, float angle) -> b2Vec2 {
                 float c = std::cos(angle); float s = std::sin(angle);
                 float dx = global.x - objPos.x; float dy = global.y - objPos.y;
                 return b2Vec2(dx * c + dy * s, -dx * s + dy * c);
@@ -367,10 +414,10 @@ auto toLocal = [&](b2Vec2 global, b2Vec2 objPos, float angle) -> b2Vec2 {
                         w.body->GetWorldPoint(b2Vec2(-w.width/2.0f,  w.height/2.0f))  // BL
                     };
 
-                    if ((mouseB2 - rotHandleGlobal).Length() < 1.2f) {
+                    if ((mouseB2 - rotHandleGlobal).Length() < gizmoTolerance) {
                         isHoveringRotate = true;
                     } else {
-                        float minDist = 1.2f; 
+                        float minDist = gizmoTolerance; 
                         for (int c = 0; c < 4; c++) {
                             float dist = (mouseB2 - corners[c]).Length();
                             if (dist < minDist) { 
@@ -391,7 +438,7 @@ auto toLocal = [&](b2Vec2 global, b2Vec2 objPos, float angle) -> b2Vec2 {
                         wzPos + b2Vec2(-wzW/2.0f,  wzH/2.0f)
                     };
 
-                    float minDist = 1.2f;
+                    float minDist = gizmoTolerance;
                     for (int c = 0; c < 4; c++) {
                         float dist = (mouseB2 - corners[c]).Length();
                         if (dist < minDist) { 
@@ -405,18 +452,18 @@ auto toLocal = [&](b2Vec2 global, b2Vec2 objPos, float angle) -> b2Vec2 {
                 if (!isHoveringRotate && hoveredScaleCorner == -1) {
                     // Priorizamos chequear el objeto que YA está seleccionado para que no lo suelte fácil
                     if (selectedType == EntityType::Racers && selectedIndex >= 0 && selectedIndex < bodies.size()) {
-                        if ((mouseB2 - bodies[selectedIndex]->GetPosition()).Length() < (physics.currentRacerSize / 2.0f) + 0.8f) isHoveringMove = true;
+                        if ((mouseB2 - bodies[selectedIndex]->GetPosition()).Length() < (physics.currentRacerSize / 2.0f) + movePadding) isHoveringMove = true;
                     } else if (selectedType == EntityType::Wall && selectedIndex >= 0 && selectedIndex < physics.getCustomWalls().size()) {
-                        if (pointInWall(mouseB2, physics.getCustomWalls()[selectedIndex], 0.8f)) isHoveringMove = true;
+                        if (pointInWall(mouseB2, physics.getCustomWalls()[selectedIndex], movePadding)) isHoveringMove = true;
                     } else if (selectedType == EntityType::WinZone) {
-                        if (std::abs(mouseB2.x - physics.winZonePos[0]) <= physics.winZoneSize[0]/2.0f + 0.8f && 
-                            std::abs(mouseB2.y - physics.winZonePos[1]) <= physics.winZoneSize[1]/2.0f + 0.8f) isHoveringMove = true;
+                        if (std::abs(mouseB2.x - physics.winZonePos[0]) <= physics.winZoneSize[0]/2.0f + movePadding && 
+                            std::abs(mouseB2.y - physics.winZonePos[1]) <= physics.winZoneSize[1]/2.0f + movePadding) isHoveringMove = true;
                     }
                     
                     // Si no está arriba del seleccionado, chequeamos el resto de forma más ajustada
                     if (!isHoveringMove) {
                         for (int i = 0; i < bodies.size(); ++i) {
-                            if ((mouseB2 - bodies[i]->GetPosition()).Length() < physics.currentRacerSize / 2.0f + 0.5f) { isHoveringMove = true; break; }
+                            if ((mouseB2 - bodies[i]->GetPosition()).Length() < physics.currentRacerSize / 2.0f + movePadding) { isHoveringMove = true; break; }
                         }
                         if (!isHoveringMove) {
                             for (int i = 0; i < physics.getCustomWalls().size(); ++i) {
@@ -438,7 +485,7 @@ auto toLocal = [&](b2Vec2 global, b2Vec2 objPos, float angle) -> b2Vec2 {
             else if (currentGizmo == GizmoState::Moving || isHoveringMove) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
 
             // --- LÓGICA DE CLICS Y ARRASTRE ---
-            if (sf::Mouse::isButtonPressed(sf::Mouse::Left)) {
+            if (ptr.state == PointerState::Pressed) {
                 if (currentGizmo == GizmoState::None) {
                     bool handleClicked = false;
                     
@@ -473,7 +520,7 @@ auto toLocal = [&](b2Vec2 global, b2Vec2 objPos, float angle) -> b2Vec2 {
                     if (!handleClicked) {
                         int clickedRacer = -1;
                         for (int i = 0; i < bodies.size(); ++i) {
-                            if ((mouseB2 - bodies[i]->GetPosition()).Length() < (physics.currentRacerSize / 2.0f) + 0.5f) { clickedRacer = i; break; }
+                            if ((mouseB2 - bodies[i]->GetPosition()).Length() < (physics.currentRacerSize / 2.0f) + movePadding) { clickedRacer = i; break; }
                         }
 
                         if (clickedRacer != -1) {
@@ -485,7 +532,7 @@ auto toLocal = [&](b2Vec2 global, b2Vec2 objPos, float angle) -> b2Vec2 {
                             int clickedWall = -1;
                             // Prioridad a la pared seleccionada por si la estás agarrando del borde
                             if (selectedType == EntityType::Wall && selectedIndex >= 0 && selectedIndex < physics.getCustomWalls().size()) {
-                                if (pointInWall(mouseB2, physics.getCustomWalls()[selectedIndex], 0.8f)) clickedWall = selectedIndex;
+                                if (pointInWall(mouseB2, physics.getCustomWalls()[selectedIndex], movePadding)) clickedWall = selectedIndex;
                             }
                             // Si no, buscamos cualquier otra
                             if (clickedWall == -1) {
@@ -500,8 +547,8 @@ auto toLocal = [&](b2Vec2 global, b2Vec2 objPos, float angle) -> b2Vec2 {
                                 currentGizmo = GizmoState::Moving;
                                 b2Vec2 objPos = physics.getCustomWalls()[clickedWall].body->GetPosition();
                                 dragOffset = b2Vec2(box2dX - objPos.x, box2dY - objPos.y);
-                            } else if (std::abs(mouseB2.x - physics.winZonePos[0]) <= physics.winZoneSize[0]/2.0f + 0.5f && 
-                                       std::abs(mouseB2.y - physics.winZonePos[1]) <= physics.winZoneSize[1]/2.0f + 0.5f) {
+                            } else if (std::abs(mouseB2.x - physics.winZonePos[0]) <= physics.winZoneSize[0]/2.0f + movePadding && 
+                                       std::abs(mouseB2.y - physics.winZonePos[1]) <= physics.winZoneSize[1]/2.0f + movePadding) {
                                 selectedType = EntityType::WinZone;
                                 currentGizmo = GizmoState::Moving;
                                 dragOffset = mouseB2 - b2Vec2(physics.winZonePos[0], physics.winZonePos[1]);
@@ -511,78 +558,80 @@ auto toLocal = [&](b2Vec2 global, b2Vec2 objPos, float angle) -> b2Vec2 {
                             }
                         }
                     }
-                } else {
-                    // --- FASE DE ARRASTRE ---
-                    if (currentGizmo == GizmoState::Moving) {
-                        if (selectedType == EntityType::Wall && selectedIndex >= 0) {
-                            CustomWall& w = physics.getCustomWalls()[selectedIndex];
-                            w.body->SetTransform(b2Vec2(box2dX - dragOffset.x, box2dY - dragOffset.y), w.rotation);
-                            w.body->SetAwake(true);
-                        } 
-                        else if (selectedType == EntityType::Racers && selectedIndex >= 0) {
-                            b2Body* b = bodies[selectedIndex];
-                            b->SetTransform(b2Vec2(box2dX - dragOffset.x, box2dY - dragOffset.y), b->GetAngle());
-                            b->SetLinearVelocity(b2Vec2(0.0f, 0.0f)); 
-                            b->SetAwake(true);
-                        }
-                        else if (selectedType == EntityType::WinZone) {
-                            physics.winZonePos[0] = box2dX - dragOffset.x;
-                            physics.winZonePos[1] = box2dY - dragOffset.y;
-                            physics.updateWinZone(physics.winZonePos[0], physics.winZonePos[1], physics.winZoneSize[0], physics.winZoneSize[1]);
-                        }
-                    } 
-                    else if (currentGizmo == GizmoState::Rotating && selectedType == EntityType::Wall && selectedIndex >= 0) {
+                } 
+            } else if (ptr.state == PointerState::Held) {
+                // --- FASE DE ARRASTRE ---
+                if (currentGizmo == GizmoState::Moving) {
+                    if (selectedType == EntityType::Wall && selectedIndex >= 0) {
                         CustomWall& w = physics.getCustomWalls()[selectedIndex];
-                        float currentMouseAngle = std::atan2(mouseB2.y - w.body->GetPosition().y, mouseB2.x - w.body->GetPosition().x);
-                        float newAngle = initialRotation + (currentMouseAngle - initialMouseAngle);
-                        w.rotation = newAngle;
-                        w.body->SetTransform(w.body->GetPosition(), newAngle);
+                        w.body->SetTransform(b2Vec2(box2dX - dragOffset.x, box2dY - dragOffset.y), w.rotation);
                         w.body->SetAwake(true);
+                    } 
+                    else if (selectedType == EntityType::Racers && selectedIndex >= 0) {
+                        b2Body* b = bodies[selectedIndex];
+                        b->SetTransform(b2Vec2(box2dX - dragOffset.x, box2dY - dragOffset.y), b->GetAngle());
+                        b->SetLinearVelocity(b2Vec2(0.0f, 0.0f)); 
+                        b->SetAwake(true);
                     }
-                    else if (currentGizmo == GizmoState::Scaling) {
-                        float deltaX, deltaY;
-                        float sx = (activeScaleCorner == 1 || activeScaleCorner == 2) ? 1.0f : -1.0f;
-                        float sy = (activeScaleCorner == 2 || activeScaleCorner == 3) ? 1.0f : -1.0f;
+                    else if (selectedType == EntityType::WinZone) {
+                        physics.winZonePos[0] = box2dX - dragOffset.x;
+                        physics.winZonePos[1] = box2dY - dragOffset.y;
+                        physics.updateWinZone(physics.winZonePos[0], physics.winZonePos[1], physics.winZoneSize[0], physics.winZoneSize[1]);
+                    }
+                } 
+                else if (currentGizmo == GizmoState::Rotating && selectedType == EntityType::Wall && selectedIndex >= 0) {
+                    CustomWall& w = physics.getCustomWalls()[selectedIndex];
+                    float currentMouseAngle = std::atan2(mouseB2.y - w.body->GetPosition().y, mouseB2.x - w.body->GetPosition().x);
+                    float newAngle = initialRotation + (currentMouseAngle - initialMouseAngle);
+                    w.rotation = newAngle;
+                    w.body->SetTransform(w.body->GetPosition(), newAngle);
+                    w.body->SetAwake(true);
+                }
+                else if (currentGizmo == GizmoState::Scaling) {
+                    float deltaX, deltaY;
+                    float sx = (activeScaleCorner == 1 || activeScaleCorner == 2) ? 1.0f : -1.0f;
+                    float sy = (activeScaleCorner == 2 || activeScaleCorner == 3) ? 1.0f : -1.0f;
 
-                        if (selectedType == EntityType::Wall && selectedIndex >= 0) {
-                            CustomWall& w = physics.getCustomWalls()[selectedIndex];
-                            b2Vec2 currentMouseLocal = toLocal(mouseB2, initialPos, w.rotation);
-                            deltaX = currentMouseLocal.x - initialMouseLocal.x;
-                            deltaY = currentMouseLocal.y - initialMouseLocal.y;
+                    if (selectedType == EntityType::Wall && selectedIndex >= 0) {
+                        CustomWall& w = physics.getCustomWalls()[selectedIndex];
+                        b2Vec2 currentMouseLocal = toLocal(mouseB2, initialPos, w.rotation);
+                        deltaX = currentMouseLocal.x - initialMouseLocal.x;
+                        deltaY = currentMouseLocal.y - initialMouseLocal.y;
 
-                            float newW = std::max(0.5f, initialWidth + (deltaX * sx));
-                            float newH = std::max(0.5f, initialHeight + (deltaY * sy));
+                        float newW = std::max(0.5f, initialWidth + (deltaX * sx));
+                        float newH = std::max(0.5f, initialHeight + (deltaY * sy));
 
-                            b2Vec2 fixedLocal(-sx * initialWidth / 2.0f, -sy * initialHeight / 2.0f);
-                            b2Vec2 newCenterLocal((fixedLocal.x + (fixedLocal.x + sx * newW)) / 2.0f, (fixedLocal.y + (fixedLocal.y + sy * newH)) / 2.0f);
-                            b2Vec2 newCenterGlobal = toGlobal(newCenterLocal, initialPos, w.rotation);
+                        b2Vec2 fixedLocal(-sx * initialWidth / 2.0f, -sy * initialHeight / 2.0f);
+                        b2Vec2 newCenterLocal((fixedLocal.x + (fixedLocal.x + sx * newW)) / 2.0f, (fixedLocal.y + (fixedLocal.y + sy * newH)) / 2.0f);
+                        b2Vec2 newCenterGlobal = toGlobal(newCenterLocal, initialPos, w.rotation);
 
-                            physics.updateCustomWall(selectedIndex, newCenterGlobal.x, newCenterGlobal.y, newW, newH, w.soundID, w.shapeType, w.rotation);
-                            w.body->SetAwake(true);
-                        } 
-                        else if (selectedType == EntityType::WinZone) {
-                            b2Vec2 currentMouseLocal = mouseB2 - initialPos; 
-                            deltaX = currentMouseLocal.x - initialMouseLocal.x;
-                            deltaY = currentMouseLocal.y - initialMouseLocal.y;
+                        physics.updateCustomWall(selectedIndex, newCenterGlobal.x, newCenterGlobal.y, newW, newH, w.soundID, w.shapeType, w.rotation);
+                        w.body->SetAwake(true);
+                    } 
+                    else if (selectedType == EntityType::WinZone) {
+                        b2Vec2 currentMouseLocal = mouseB2 - initialPos; 
+                        deltaX = currentMouseLocal.x - initialMouseLocal.x;
+                        deltaY = currentMouseLocal.y - initialMouseLocal.y;
 
-                            float newW = std::max(0.5f, initialWidth + (deltaX * sx));
-                            float newH = std::max(0.5f, initialHeight + (deltaY * sy));
+                        float newW = std::max(0.5f, initialWidth + (deltaX * sx));
+                        float newH = std::max(0.5f, initialHeight + (deltaY * sy));
 
-                            b2Vec2 fixedLocal(-sx * initialWidth / 2.0f, -sy * initialHeight / 2.0f);
-                            b2Vec2 newCenterLocal((fixedLocal.x + (fixedLocal.x + sx * newW)) / 2.0f, (fixedLocal.y + (fixedLocal.y + sy * newH)) / 2.0f);
-                            b2Vec2 newCenterGlobal = initialPos + newCenterLocal;
+                        b2Vec2 fixedLocal(-sx * initialWidth / 2.0f, -sy * initialHeight / 2.0f);
+                        b2Vec2 newCenterLocal((fixedLocal.x + (fixedLocal.x + sx * newW)) / 2.0f, (fixedLocal.y + (fixedLocal.y + sy * newH)) / 2.0f);
+                        b2Vec2 newCenterGlobal = initialPos + newCenterLocal;
 
-                            physics.winZonePos[0] = newCenterGlobal.x;
-                            physics.winZonePos[1] = newCenterGlobal.y;
-                            physics.winZoneSize[0] = newW;
-                            physics.winZoneSize[1] = newH;
-                            physics.updateWinZone(physics.winZonePos[0], physics.winZonePos[1], physics.winZoneSize[0], physics.winZoneSize[1]);
-                        }
+                        physics.winZonePos[0] = newCenterGlobal.x;
+                        physics.winZonePos[1] = newCenterGlobal.y;
+                        physics.winZoneSize[0] = newW;
+                        physics.winZoneSize[1] = newH;
+                        physics.updateWinZone(physics.winZonePos[0], physics.winZonePos[1], physics.winZoneSize[0], physics.winZoneSize[1]);
                     }
                 }
-            } else {
+            } else if (ptr.state == PointerState::Released) {
                 currentGizmo = GizmoState::None;
             }
+        } else {
+            currentGizmo = GizmoState::None;
         }
 
 sf::Time dt = clock.restart();
@@ -680,9 +729,11 @@ if (!physics.isPaused) {
 
         // 1. TOOLBAR (Panel Superior)
     // 1. TOOLBAR (Panel Superior, anclado arriba y ocupando el ancho del centro)
-        float panelWidth = 320.0f;
-        ImGui::SetNextWindowPos(ImVec2(panelWidth, 0), ImGuiCond_Always);
-        ImGui::SetNextWindowSize(ImVec2(desktopMode.width - (panelWidth * 2), 65), ImGuiCond_Always);
+        ImGuiWindowFlags panelFlags = ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize;
+        if (!isMobile) panelFlags |= ImGuiWindowFlags_NoCollapse; // Dejamos colapsar en celular
+
+        ImGui::SetNextWindowPos(ImVec2(isMobile ? 0 : leftPanelWidth, 0), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(isMobile ? screenWidth : availableWidth, toolbarHeight), ImGuiCond_Always);
         ImGui::Begin("Toolbar", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoMove);
 
         if (recorder && recorder->isRecording) {
@@ -745,9 +796,9 @@ if (!physics.isPaused) {
         ImGui::End();
 
         // 2. HIERARCHY (Panel Izquierdo)
-        ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
-        ImGui::SetNextWindowSize(ImVec2(panelWidth, desktopMode.height), ImGuiCond_Always);
-        ImGui::Begin("Hierarchy", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
+        ImGui::SetNextWindowPos(ImVec2(0, isMobile ? screenHeight - 200 : 0), ImGuiCond_Appearing);
+        ImGui::SetNextWindowSize(ImVec2(leftPanelWidth, isMobile ? 200 : screenHeight), ImGuiCond_Always);
+        ImGui::Begin("Hierarchy", nullptr, panelFlags);
 
         ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, 1), "SCENE");
         if (ImGui::Selectable("Global Settings", selectedType == EntityType::Global)) selectedType = EntityType::Global;
@@ -809,9 +860,9 @@ if (!physics.isPaused) {
         ImGui::End();
 
         // 3. INSPECTOR (Panel Derecho, de arriba a abajo)
-        ImGui::SetNextWindowPos(ImVec2(desktopMode.width - panelWidth, 0), ImGuiCond_Always);
-        ImGui::SetNextWindowSize(ImVec2(panelWidth, desktopMode.height), ImGuiCond_Always);
-        ImGui::Begin("Inspector", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
+        ImGui::SetNextWindowPos(ImVec2(screenWidth - rightPanelWidth, isMobile ? toolbarHeight : 0), ImGuiCond_Appearing);
+        ImGui::SetNextWindowSize(ImVec2(rightPanelWidth, isMobile ? screenHeight/2 : screenHeight), ImGuiCond_Always);
+        ImGui::Begin("Inspector", nullptr, panelFlags);
 
         int wallToDelete = -1;
         int wallToDuplicate = -1;
@@ -1742,12 +1793,8 @@ if (!physics.isPaused) {
 
         // 2. Ahora el resto del código que ya tenías para centrar el viewport
         // se aplica sobre el renderSprite que ya tiene su textura correcta.
-        float scale = DISPLAY_SIZE / (float)RENDER_WIDTH; 
-        renderSprite.setScale(scale, scale);
-        
-        float offsetX = (desktopMode.width - DISPLAY_SIZE) / 2.0f;
-        float offsetY = (desktopMode.height - DISPLAY_SIZE) / 2.0f;
-        
+        renderSprite.setScale(scaleBase, scaleBase);
+        // offsetX y offsetY ya los calculamos arriba con el layout dinámico
         renderSprite.setPosition(offsetX, offsetY);
 
         // Opcional: Le metemos un marquito sutil al viewport para que se despegue del fondo
