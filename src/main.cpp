@@ -24,6 +24,7 @@ struct TrailPoint {
 struct Trail {
     std::deque<TrailPoint> points;
     sf::Color color;
+    float currentDuration = 0.1f;
 };
 
 struct AmbientParticle {
@@ -625,20 +626,40 @@ if (!physics.isPaused) {
                 b2Vec2 pos = bodies[i]->GetPosition();
                 sf::Vector2f p(pos.x * physics.SCALE, pos.y * physics.SCALE);
                 
+                float speed = bodies[i]->GetLinearVelocity().Length();
+                float targetDuration = (((speed * 1.5f) + 5.0f) / 60.0f) * 0.8f;
+                trails[i].currentDuration = targetDuration; // Guardamos para el render
+                
+                // SUBDIVISIÓN GEOMÉTRICA: Si hay poca densidad (bajos FPS) y mucha distancia,
+                // metemos vértices extra para que nunca se vea "tosca o cuadrada".
+                if (!trails[i].points.empty()) {
+                    sf::Vector2f lastP = trails[i].points.front().pos;
+                    float lastTime = trails[i].points.front().time;
+                    
+                    float dx = p.x - lastP.x;
+                    float dy = p.y - lastP.y;
+                    float dist = std::sqrt(dx*dx + dy*dy);
+                    
+                    int segments = (int)(dist / 6.0f) + 1; // Un vértice cada 6 píxeles máximo
+                    if (segments > 1 && segments < 20) { 
+                        for (int k = 1; k < segments; ++k) {
+                            float t = (float)k / (float)segments;
+                            sf::Vector2f interpP = lastP + sf::Vector2f(dx * t, dy * t);
+                            float interpTime = lastTime + (globalTime - lastTime) * t;
+                            trails[i].points.push_front({interpP, interpTime});
+                        }
+                    }
+                }
+                
+                // Agregamos el punto original del frame
                 trails[i].points.push_front({p, globalTime});
                 
-                float speed = bodies[i]->GetLinearVelocity().Length();
-                
-                // Mantenemos la longitud visual exacta calculando el tiempo de vida
-                // (speed * 1.5 + 5) eran los frames a 60 FPS. Lo pasamos a segundos:
-                float targetDuration = ((speed * 1.5f) + 5.0f) / 60.0f;
-                
-                // Purgamos la memoria limpiando puntos viejos en base al reloj global, NO a la cantidad.
+                // Limpieza por tiempo real
                 while (!trails[i].points.empty() && (globalTime - trails[i].points.back().time) > targetDuration) {
                     trails[i].points.pop_back();
                 }
             }
-        }
+}
 
         if (physics.gameOver) {
             if (!victorySequenceStarted) {
@@ -1269,8 +1290,19 @@ if (!physics.isPaused) {
 
                         sf::Vector2f normal(-dir.y/len, dir.x/len);
 
-                        float lifePct1 = 1.0f - ((float)(j-1) / (float)pts.size());
-                        float lifePct2 = 1.0f - ((float)j / (float)pts.size());
+                        // MAGIA ACÁ: Desacoplamos visualmente de la cantidad de puntos.
+                        // Usamos el TIEMPO real del punto. Queda idéntico sin importar los FPS.
+                        float maxAge = std::max(0.001f, trails[i].currentDuration);
+                        float age1 = globalTime - pts[j-1].time;
+                        float age2 = globalTime - pts[j].time;
+
+                        float lifePct1 = 1.0f - (age1 / maxAge);
+                        float lifePct2 = 1.0f - (age2 / maxAge);
+
+                        // Clamp manual para blindar errores si algún punto de la física se atrasa
+                        if (lifePct1 < 0.0f) lifePct1 = 0.0f; else if (lifePct1 > 1.0f) lifePct1 = 1.0f;
+                        if (lifePct2 < 0.0f) lifePct2 = 0.0f; else if (lifePct2 > 1.0f) lifePct2 = 1.0f;
+
                         float widthPct1 = std::pow(lifePct1, 0.6f);
                         float widthPct2 = std::pow(lifePct2, 0.6f);
                         sf::Color baseColor = trails[i].color;
