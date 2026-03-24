@@ -95,6 +95,10 @@ struct CustomWall {
     int currentHits = 3;
     bool pendingDestroy = false;
     bool useTextForHP = false;
+
+    int zIndex = 0;       
+    int borderSide = -1;  
+    bool hasOutline = true; // <--- NUEVA MAGIA
 };
 
 class ChaosContactListener : public b2ContactListener {
@@ -186,6 +190,10 @@ public:
     float winZonePos[2] = {0.0f, 0.0f};
     float winZoneSize[2] = {2.0f, 2.0f};
     bool winZoneGlow = true;
+
+    float mapWidth = 24.0f;
+    float mapHeight = 72.0f;
+    void updateMapBounds(float newWidth, float newHeight);
 
     void updateWallExpansion(float dt);
     void updateMovingPlatforms(float dt);

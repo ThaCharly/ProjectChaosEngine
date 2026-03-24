@@ -335,10 +335,17 @@ int main()
                 float c = std::cos(angle); float s = std::sin(angle);
                 return b2Vec2(objPos.x + local.x * c - local.y * s, objPos.y + local.x * s + local.y * c);
             };
-            auto toLocal = [&](b2Vec2 global, b2Vec2 objPos, float angle) -> b2Vec2 {
+auto toLocal = [&](b2Vec2 global, b2Vec2 objPos, float angle) -> b2Vec2 {
                 float c = std::cos(angle); float s = std::sin(angle);
                 float dx = global.x - objPos.x; float dy = global.y - objPos.y;
                 return b2Vec2(dx * c + dy * s, -dx * s + dy * c);
+            };
+
+            // MAGIA NUEVA: Colisión con margen de error (Padding) para que los hovers sean suaves
+            auto pointInWall = [&](b2Vec2 p, const CustomWall& w, float padding) {
+                b2Vec2 localP = toLocal(p, w.body->GetPosition(), w.body->GetAngle());
+                return std::abs(localP.x) <= (w.width / 2.0f + padding) &&
+                       std::abs(localP.y) <= (w.height / 2.0f + padding);
             };
 
             // --- DETECCIÓN DE HOVER (Cursores y Gizmos) ---
@@ -353,16 +360,15 @@ int main()
                         w.body->GetWorldPoint(b2Vec2(-w.width/2.0f,  w.height/2.0f))  // BL
                     };
 
-                    // Hitbox gigante invisible de 1.5 metros
-                    if ((mouseB2 - rotHandleGlobal).Length() < 1.5f) {
+                    if ((mouseB2 - rotHandleGlobal).Length() < 1.2f) {
                         isHoveringRotate = true;
                     } else {
-                        float minDist = 1.5f; 
+                        float minDist = 1.2f; 
                         for (int c = 0; c < 4; c++) {
                             float dist = (mouseB2 - corners[c]).Length();
                             if (dist < minDist) { 
                                 hoveredScaleCorner = c; 
-                                minDist = dist; // Nos quedamos con la esquina más cercana al mouse
+                                minDist = dist; 
                             }
                         }
                     }
@@ -378,7 +384,7 @@ int main()
                         wzPos + b2Vec2(-wzW/2.0f,  wzH/2.0f)
                     };
 
-                    float minDist = 1.5f;
+                    float minDist = 1.2f;
                     for (int c = 0; c < 4; c++) {
                         float dist = (mouseB2 - corners[c]).Length();
                         if (dist < minDist) { 
@@ -388,16 +394,32 @@ int main()
                     }
                 }
 
-                // Fallback para cursor de Mover (si no tocamos ningún pincho)
+                // Fallback para cursor de Mover (Usamos PADDING para que no titile)
                 if (!isHoveringRotate && hoveredScaleCorner == -1) {
-                    int hoveredRacer = -1;
-                    for (int i = 0; i < bodies.size(); ++i) {
-                        if ((mouseB2 - bodies[i]->GetPosition()).Length() < physics.currentRacerSize / 2.0f) { hoveredRacer = i; break; }
+                    // Priorizamos chequear el objeto que YA está seleccionado para que no lo suelte fácil
+                    if (selectedType == EntityType::Racers && selectedIndex >= 0 && selectedIndex < bodies.size()) {
+                        if ((mouseB2 - bodies[selectedIndex]->GetPosition()).Length() < (physics.currentRacerSize / 2.0f) + 0.8f) isHoveringMove = true;
+                    } else if (selectedType == EntityType::Wall && selectedIndex >= 0 && selectedIndex < physics.getCustomWalls().size()) {
+                        if (pointInWall(mouseB2, physics.getCustomWalls()[selectedIndex], 0.8f)) isHoveringMove = true;
+                    } else if (selectedType == EntityType::WinZone) {
+                        if (std::abs(mouseB2.x - physics.winZonePos[0]) <= physics.winZoneSize[0]/2.0f + 0.8f && 
+                            std::abs(mouseB2.y - physics.winZonePos[1]) <= physics.winZoneSize[1]/2.0f + 0.8f) isHoveringMove = true;
                     }
                     
-                    if (hoveredRacer != -1) isHoveringMove = true;
-                    else if (physics.getWallAtPoint(box2dX, box2dY) != -1) isHoveringMove = true;
-                    else if (std::abs(mouseB2.x - physics.winZonePos[0]) <= physics.winZoneSize[0]/2.0f && std::abs(mouseB2.y - physics.winZonePos[1]) <= physics.winZoneSize[1]/2.0f) isHoveringMove = true;
+                    // Si no está arriba del seleccionado, chequeamos el resto de forma más ajustada
+                    if (!isHoveringMove) {
+                        for (int i = 0; i < bodies.size(); ++i) {
+                            if ((mouseB2 - bodies[i]->GetPosition()).Length() < physics.currentRacerSize / 2.0f + 0.5f) { isHoveringMove = true; break; }
+                        }
+                        if (!isHoveringMove) {
+                            for (int i = 0; i < physics.getCustomWalls().size(); ++i) {
+                                if (pointInWall(mouseB2, physics.getCustomWalls()[i], 0.0f)) { isHoveringMove = true; break; }
+                            }
+                        }
+                        if (!isHoveringMove) {
+                            if (std::abs(mouseB2.x - physics.winZonePos[0]) <= physics.winZoneSize[0]/2.0f && std::abs(mouseB2.y - physics.winZonePos[1]) <= physics.winZoneSize[1]/2.0f) isHoveringMove = true;
+                        }
+                    }
                 }
             }
 
@@ -436,31 +458,43 @@ int main()
                         initialPos = b2Vec2(physics.winZonePos[0], physics.winZonePos[1]);
                         initialWidth = physics.winZoneSize[0];
                         initialHeight = physics.winZoneSize[1];
-                        initialMouseLocal = mouseB2 - initialPos; // AABB no rota, es directo
+                        initialMouseLocal = mouseB2 - initialPos; // AABB no rota
                         handleClicked = true;
                     }
 
-                    // 2. Si no tocamos gizmos, priorizamos la selección física de cuerpos (Z-Index inverso)
+                    // 2. Si no tocamos gizmos, seleccionamos cuerpos
                     if (!handleClicked) {
                         int clickedRacer = -1;
                         for (int i = 0; i < bodies.size(); ++i) {
-                            if ((mouseB2 - bodies[i]->GetPosition()).Length() < physics.currentRacerSize / 2.0f) { clickedRacer = i; break; }
+                            if ((mouseB2 - bodies[i]->GetPosition()).Length() < (physics.currentRacerSize / 2.0f) + 0.5f) { clickedRacer = i; break; }
                         }
 
                         if (clickedRacer != -1) {
                             selectedType = EntityType::Racers;
-                            selectedIndex = clickedRacer; // Usamos el index para saber cuál arrastramos
+                            selectedIndex = clickedRacer; 
                             currentGizmo = GizmoState::Moving;
                             dragOffset = mouseB2 - bodies[clickedRacer]->GetPosition();
                         } else {
-                            int clickedWall = physics.getWallAtPoint(box2dX, box2dY);
+                            int clickedWall = -1;
+                            // Prioridad a la pared seleccionada por si la estás agarrando del borde
+                            if (selectedType == EntityType::Wall && selectedIndex >= 0 && selectedIndex < physics.getCustomWalls().size()) {
+                                if (pointInWall(mouseB2, physics.getCustomWalls()[selectedIndex], 0.8f)) clickedWall = selectedIndex;
+                            }
+                            // Si no, buscamos cualquier otra
+                            if (clickedWall == -1) {
+                                for (int i = (int)physics.getCustomWalls().size() - 1; i >= 0; --i) {
+                                    if (pointInWall(mouseB2, physics.getCustomWalls()[i], 0.0f)) { clickedWall = i; break; }
+                                }
+                            }
+
                             if (clickedWall != -1) {
                                 selectedType = EntityType::Wall;
                                 selectedIndex = clickedWall;
                                 currentGizmo = GizmoState::Moving;
                                 b2Vec2 objPos = physics.getCustomWalls()[clickedWall].body->GetPosition();
                                 dragOffset = b2Vec2(box2dX - objPos.x, box2dY - objPos.y);
-                            } else if (std::abs(mouseB2.x - physics.winZonePos[0]) <= physics.winZoneSize[0]/2.0f && std::abs(mouseB2.y - physics.winZonePos[1]) <= physics.winZoneSize[1]/2.0f) {
+                            } else if (std::abs(mouseB2.x - physics.winZonePos[0]) <= physics.winZoneSize[0]/2.0f + 0.5f && 
+                                       std::abs(mouseB2.y - physics.winZonePos[1]) <= physics.winZoneSize[1]/2.0f + 0.5f) {
                                 selectedType = EntityType::WinZone;
                                 currentGizmo = GizmoState::Moving;
                                 dragOffset = mouseB2 - b2Vec2(physics.winZonePos[0], physics.winZonePos[1]);
@@ -481,7 +515,7 @@ int main()
                         else if (selectedType == EntityType::Racers && selectedIndex >= 0) {
                             b2Body* b = bodies[selectedIndex];
                             b->SetTransform(b2Vec2(box2dX - dragOffset.x, box2dY - dragOffset.y), b->GetAngle());
-                            b->SetLinearVelocity(b2Vec2(0.0f, 0.0f)); // Neutralizamos inercias si el tiempo corre
+                            b->SetLinearVelocity(b2Vec2(0.0f, 0.0f)); 
                             b->SetAwake(true);
                         }
                         else if (selectedType == EntityType::WinZone) {
@@ -520,7 +554,7 @@ int main()
                             w.body->SetAwake(true);
                         } 
                         else if (selectedType == EntityType::WinZone) {
-                            b2Vec2 currentMouseLocal = mouseB2 - initialPos; // Sin rotar
+                            b2Vec2 currentMouseLocal = mouseB2 - initialPos; 
                             deltaX = currentMouseLocal.x - initialMouseLocal.x;
                             deltaY = currentMouseLocal.y - initialMouseLocal.y;
 
@@ -843,6 +877,21 @@ if (!physics.isPaused) {
                 changed |= ImGui::DragFloat2("Size", size, 0.1f, 0.5f, 30.0f);
                 changed |= ImGui::SliderInt("Sound ID", &snd, 0, 8);
 
+                // --- CONTROL DE CAPAS Y ESTILO INDEPENDIENTE ---
+                ImGui::Separator();
+                ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, 1.0f), "RENDER LAYER & STYLE");
+                
+                // Botones rápidos para subir/bajar capas
+                if (ImGui::Button("-##Layer")) w.zIndex--;
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(40);
+                ImGui::InputInt("Layer", &w.zIndex, 0, 0); // Desactivamos los steps nativos para usar los nuestros
+                ImGui::SameLine();
+                if (ImGui::Button("+##Layer")) w.zIndex++;
+
+                // El checkbox para matar el borde a esta pared específica
+                ImGui::Checkbox("Draw Outline (Border)", &w.hasOutline);
+
                 ImGui::Separator();
                 ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "DESTRUCTION SYSTEM");
                 if (ImGui::Checkbox("Is Destructible", &w.isDestructible)) {
@@ -998,7 +1047,7 @@ if (!physics.isPaused) {
         // ==============================================
         // --- DRAW: RENDERIZADO AL BUFFER GIGANTE ---
         // ==============================================
-    // 1. Limpiar con el color de vacío
+        // 1. Limpiar con el color de vacío
         gameBuffer.clear(sf::Color(30, 30, 30)); 
 
         // 2. Dibujar Polvo Atmosférico con movimiento energético
@@ -1014,7 +1063,6 @@ if (!physics.isPaused) {
                 }
             }
             
-            // Cálculo del vaivén horizontal
             float currentX = p.basePos.x + std::sin(globalTime * p.phaseSpeed + p.phaseOffset) * p.amplitude;
             float s = p.size;
             
@@ -1030,207 +1078,440 @@ if (!physics.isPaused) {
         }
 
         sf::RenderStates dustStates;
-        dustStates.blendMode = sf::BlendAdd; // Para que el bloom las "atrape" un poquito
+        dustStates.blendMode = sf::BlendAdd; 
         gameBuffer.draw(dustVA, dustStates);
 
         // 3. Dibujar la grilla encima
         gameBuffer.draw(background);
 
+
+        // ==============================================
+        // --- SISTEMA DE CAPAS (Z-INDEX LOOP) ---
+        // ==============================================
         const auto& customWalls = physics.getCustomWalls();
+        
+        // Calculamos los extremos del bucle dinámicamente
+        int minLayer = -1; // Nos aseguramos que al menos pase por el -1
+        int maxLayer = -1;
         for (const auto& wall : customWalls) {
-            b2Vec2 pos = wall.body->GetPosition();
-            float wPx = wall.width * physics.SCALE;
-            float hPx = wall.height * physics.SCALE;
-            
-            sf::Shape* shapeToDraw = nullptr;
-            sf::RectangleShape rectShape;
-            sf::ConvexShape triShape;
-
-            if (wall.shapeType == 1) {
-                triShape.setPointCount(3);
-                triShape.setPoint(0, sf::Vector2f(0.0f, -hPx / 2.0f));       
-                triShape.setPoint(1, sf::Vector2f(wPx / 2.0f, hPx / 2.0f));  
-                triShape.setPoint(2, sf::Vector2f(-wPx / 2.0f, hPx / 2.0f)); 
-                
-                triShape.setPosition(pos.x * physics.SCALE, pos.y * physics.SCALE);
-                triShape.setRotation(wall.body->GetAngle() * 180.0f / 3.14159f);
-                
-                shapeToDraw = &triShape;
-            } else {
-                rectShape.setSize(sf::Vector2f(wPx, hPx));
-                rectShape.setOrigin(wPx / 2.0f, hPx / 2.0f);
-                rectShape.setPosition(pos.x * physics.SCALE, pos.y * physics.SCALE);
-                rectShape.setRotation(wall.body->GetAngle() * 180.0f / 3.14159f);
-                
-                shapeToDraw = &rectShape;
-            }
-
-            sf::Color currentFill = lerpColor(wall.baseFillColor, wall.flashColor, wall.flashTimer);
-            sf::Color currentOutline = lerpColor(wall.neonColor, sf::Color::White, wall.flashTimer * 0.5f);
-
-            if (wall.isDeadly) {
-                float dangerPulse = (std::sin(globalTime * 10.0f) + 1.0f) * 0.5f; 
-                currentFill = sf::Color(100 + (dangerPulse * 50), 0, 0, 255); 
-                currentOutline = sf::Color::Red;
-            }
-
-            shapeToDraw->setFillColor(currentFill); 
-            shapeToDraw->setOutlineColor(currentOutline);
-            
-            float baseThickness = 0.08f * physics.SCALE; 
-            float thickness = baseThickness + (wall.flashTimer * baseThickness);
-            shapeToDraw->setOutlineThickness(-thickness);
-
-            gameBuffer.draw(*shapeToDraw); 
-
-            // --- RENDERIZADO DE DAÑO Y VIDA ---
-            // --- RENDERIZADO DE DAÑO Y VIDA ---
-            if (wall.isDestructible) {
-                float halfW = wPx / 2.0f;
-                float halfH = hPx / 2.0f;
-
-        // 1. GRIETAS CONTINUAS Y ESPARCIDAS
-        if (wall.currentHits < wall.maxHits) {
-        int damageLevel = wall.maxHits - wall.currentHits;
-        
-        // Si la pared tiene 200 de vida, limitamos las grietas para no tapar todo el color
-        int numCracks = std::min(damageLevel, 200); 
-        
-        std::srand((unsigned int)(reinterpret_cast<std::uintptr_t>(wall.body) & 0xFFFFFFFF));
-        
-        auto drawCrackSegment = [&](float x1, float y1, float x2, float y2) {
-            float dx = x2 - x1;
-            float dy = y2 - y1;
-            float length = std::sqrt(dx*dx + dy*dy);
-            if (length < 0.5f) return; // Filtro para evitar "basuritas"
-            
-            float crackAngle = std::atan2(dy, dx) * 180.0f / 3.14159f;
-            // Grosor fino y constante (unos 2-3 px reales en pantalla)
-            float crackThickness = std::max(4.0f, 0.036f * physics.SCALE); 
-            
-            sf::RectangleShape crackRect(sf::Vector2f(length, crackThickness));
-            crackRect.setOrigin(0.0f, crackThickness / 2.0f);
-            crackRect.setFillColor(sf::Color(10, 10, 10, 220)); 
-
-            sf::Transform t;
-            t.translate(pos.x * physics.SCALE, pos.y * physics.SCALE);
-            t.rotate(wall.body->GetAngle() * 180.0f / 3.14159f);
-
-            crackRect.setPosition(t.transformPoint(x1, y1));
-            crackRect.setRotation((wall.body->GetAngle() * 180.0f / 3.14159f) + crackAngle);
-            
-            gameBuffer.draw(crackRect);
-        };
-
-        for (int k = 0; k < numCracks; k++) {
-            // AHORA SÍ: nacen distribuidas aleatoriamente por TODA la pared
-            float currentX = (std::rand() % (int)wPx) - halfW;
-            float currentY = (std::rand() % (int)hPx) - halfH;
-            
-            // Dirección general hacia donde viaja la grieta
-            float baseAngle = (std::rand() % 360) * 3.14159f / 180.0f;
-            
-            // Hacemos que la grieta avance en 2 a 4 tramos unidos
-            int segments = 2 + (std::rand() % 3); 
-            for (int s = 0; s < segments; s++) {
-                // Zigzag suave (aprox +/- 45 grados de desviación)
-                float angle = baseAngle + ((std::rand() % 100) - 50) * 0.015f; 
-                
-                // MAGIA ACÁ: Usamos el MAX, no el MIN. Así pueden correr a lo largo de las paredes anchas.
-                float maxDim = std::max(wPx, hPx);
-                float segLen = maxDim * (0.05f + (std::rand() % 100) * 0.002f); // Largo de cada tramo
-                
-                float nextX = currentX + std::cos(angle) * segLen;
-                float nextY = currentY + std::sin(angle) * segLen;
-
-                // Clavamos a los bordes exactos para que no asomen fuera de la luz
-                nextX = std::clamp(nextX, -halfW, halfW);
-                nextY = std::clamp(nextY, -halfH, halfH);
-
-                drawCrackSegment(currentX, currentY, nextX, nextY);
-
-                // Avanzamos el punto para enganchar el siguiente tramo
-                currentX = nextX;
-                currentY = nextY;
-            }
+            if (wall.zIndex < minLayer) minLayer = wall.zIndex;
+            if (wall.zIndex > maxLayer) maxLayer = wall.zIndex;
         }
-        std::srand(std::time(nullptr)); 
-    }
 
-    // 2. INDICADORES: TEXTO O LEDS
-    if (wall.useTextForHP) {
-        sf::Text hitText;
-        hitText.setFont(uiFont); 
-        hitText.setString(std::to_string(wall.currentHits));
-        
-        // ESCALA A PRUEBA DE BALAS: Máximo el 60% del lado más chico
-        float minDim = std::min(wPx, hPx);
-        unsigned int calcSize = (unsigned int)(minDim * 0.6f);
-        if (calcSize < 12) calcSize = 12; // Mínimo de seguridad
-        hitText.setCharacterSize(calcSize); 
-        
-        hitText.setFillColor(sf::Color(255, 255, 255, 140)); 
-        
-        sf::FloatRect textRect = hitText.getLocalBounds();
-        hitText.setOrigin(textRect.left + textRect.width / 2.0f, textRect.top + textRect.height / 2.0f);
-        
-        hitText.setPosition(pos.x * physics.SCALE, pos.y * physics.SCALE);
-        
-        // Si es un pilar vertical, rotamos el número para que encaje mejor
-        float extraRotation = (hPx > wPx * 1.5f) ? 90.0f : 0.0f;
-        hitText.setRotation(wall.body->GetAngle() * 180.0f / 3.14159f + extraRotation);
-        
-        gameBuffer.draw(hitText);
-        
-    } else {
-        // --- MODO LEDS PROCEDURALES ---
-        float ledBaseSize = 0.30f * physics.SCALE; 
-        float spacing = 0.12f * physics.SCALE;
-        
-        bool vertical = (wPx < hPx);
-        float mainLength = vertical ? hPx : wPx;
-        
-        float totalWidth = (wall.maxHits * ledBaseSize) + ((wall.maxHits - 1) * spacing);
-        
-        float scaleDown = 1.0f;
-        if (totalWidth > mainLength * 0.85f) {
-            scaleDown = (mainLength * 0.85f) / totalWidth;
-        }
-        
-        float ledSize = ledBaseSize * scaleDown;
-        float currentSpacing = spacing * scaleDown;
-        float adjustedTotalWidth = (wall.maxHits * ledSize) + ((wall.maxHits - 1) * currentSpacing);
-
-        float startX = vertical ? 0.0f : (-adjustedTotalWidth / 2.0f + ledSize / 2.0f);
-        float startY = vertical ? (-adjustedTotalWidth / 2.0f + ledSize / 2.0f) : 0.0f;
-
-        sf::Transform t;
-        t.translate(pos.x * physics.SCALE, pos.y * physics.SCALE);
-        t.rotate(wall.body->GetAngle() * 180.0f / 3.14159f);
-
-        for (int k = 0; k < wall.maxHits; k++) {
-            sf::RectangleShape led(sf::Vector2f(ledSize, ledSize));
-            led.setOrigin(ledSize / 2.0f, ledSize / 2.0f);
+        for (int currentLayer = minLayer; currentLayer <= maxLayer; ++currentLayer) {
             
-            float lx = vertical ? startX : (startX + k * (ledSize + currentSpacing));
-            float ly = vertical ? (startY + k * (ledSize + currentSpacing)) : startY;
+            // ------------------------------------------
+            // CAPA -1: ENTIDADES Y SIMULACIÓN BASE
+            // ------------------------------------------
+            if (currentLayer == -1) {
+                
+                // --- A) WINZONE ---
+                b2Body* zone = physics.getWinZoneBody();
+                if (zone) {
+                    b2Vec2 pos = zone->GetPosition();
+                    sf::RectangleShape zoneRect;
+                    float w = physics.winZoneSize[0] * physics.SCALE;
+                    float h = physics.winZoneSize[1] * physics.SCALE;
+                    
+                    float alpha = 100.0f; 
+                    if (physics.winZoneGlow) {
+                        float pulse = (std::sin(globalTime * 1.5f) + 1.0f) * 0.5f; 
+                        alpha = 50.0f + pulse * 100.0f; 
+                    }
+                    
+                    zoneRect.setSize(sf::Vector2f(w, h));
+                    zoneRect.setOrigin(w/2.0f, h/2.0f);
+                    zoneRect.setPosition(pos.x * physics.SCALE, pos.y * physics.SCALE);
+                    zoneRect.setFillColor(sf::Color(255, 215, 0, (sf::Uint8)alpha)); 
+                    zoneRect.setOutlineColor(sf::Color::Yellow);
+                    zoneRect.setOutlineThickness(0.1f * physics.SCALE); 
+                    gameBuffer.draw(zoneRect);
+                }
 
-            led.setPosition(t.transformPoint(lx, ly));
-            led.setRotation(wall.body->GetAngle() * 180.0f / 3.14159f);
+                // --- B) CUCHILLOS ---
+                for (const auto& knife : physics.getKnives()) {
+                    sf::Vector2f drawPos;
+                    float drawRot;
+                    float kScale = 1.5f * physics.SCALE; 
 
-            if (k < wall.currentHits) {
-                led.setFillColor(sf::Color(100, 255, 100, 220)); 
-            } else {
-                led.setFillColor(sf::Color(255, 50, 50, 100)); 
+                    if (!knife.isPickedUp) {
+                        drawPos = sf::Vector2f(knife.body->GetPosition().x * physics.SCALE, knife.body->GetPosition().y * physics.SCALE);
+                        drawRot = knife.body->GetAngle() * 180.0f / 3.14159f; 
+                    } else {
+                        int oIdx = knife.ownerIndex;
+                        if (oIdx >= 0 && oIdx < bodies.size()) {
+                            b2Body* ownerBody = bodies[oIdx];
+                            b2Vec2 oPos = ownerBody->GetPosition();
+                            float oAngle = ownerBody->GetAngle();
+
+                            float rSize = physics.currentRacerSize / 2.0f; 
+                            b2Vec2 offset(cos(oAngle) * (rSize + 0.3f), sin(oAngle) * (rSize + 0.3f));
+                            
+                            drawPos = sf::Vector2f((oPos.x + offset.x) * physics.SCALE, (oPos.y + offset.y) * physics.SCALE);
+                            drawRot = oAngle * 180.0f / 3.14159f; 
+                        } else {
+                            continue; 
+                        }
+                    }
+
+                    if (hasKnifeTex) {
+                        sf::Sprite s(knifeTex);
+                        s.setOrigin(knifeTex.getSize().x / 2.0f, knifeTex.getSize().y / 2.0f);
+                        float scaleFactor = kScale / knifeTex.getSize().x;
+                        s.setScale(-scaleFactor, scaleFactor);
+                        s.setPosition(drawPos);
+                        s.setRotation(drawRot);
+                        gameBuffer.draw(s);
+                    } else {
+                        sf::ConvexShape tri;
+                        tri.setPointCount(3);
+                        float triSize = kScale * 0.6f; 
+                        tri.setPoint(0, sf::Vector2f(0.0f, -triSize));
+                        tri.setPoint(1, sf::Vector2f(triSize/2.0f, triSize/2.0f));
+                        tri.setPoint(2, sf::Vector2f(-triSize/2.0f, triSize/2.0f));
+                        tri.setPosition(drawPos);
+                        tri.setRotation(drawRot + 90.0f); 
+                        tri.setFillColor(sf::Color(220, 220, 220));
+                        tri.setOutlineColor(sf::Color::Red);
+                        tri.setOutlineThickness(2.0f);
+                        gameBuffer.draw(tri);
+                    }
+                }
+
+                // --- C) TUMBAS ---
+                const auto& statuses = physics.getRacerStatus();
+                float tombSize = 0.8f * physics.SCALE;  
+                float crossThick = 0.15f * physics.SCALE; 
+                float outlineThick = 0.08f * physics.SCALE;
+
+                for (size_t i = 0; i < statuses.size(); ++i) {
+                    const auto& status = statuses[i];
+                    if (!status.isAlive) {
+                        float px = status.deathPos.x * physics.SCALE;
+                        float py = status.deathPos.y * physics.SCALE;
+                        sf::Color deathColor = (i < 4) ? racerColors[i] : sf::Color::White;
+
+                        sf::RectangleShape grave;
+                        grave.setSize(sf::Vector2f(tombSize, tombSize));
+                        grave.setOrigin(tombSize / 2.0f, tombSize / 2.0f);
+                        grave.setPosition(px, py);
+                        grave.setFillColor(sf::Color(20, 20, 20, 240)); 
+                        grave.setOutlineColor(deathColor);              
+                        grave.setOutlineThickness(outlineThick);
+                        gameBuffer.draw(grave); 
+                    
+                        float crossLen = tombSize * 0.8f;      
+                        sf::RectangleShape bar1(sf::Vector2f(crossLen, crossThick));
+                        sf::RectangleShape bar2(sf::Vector2f(crossLen, crossThick));
+                        bar1.setOrigin(crossLen / 2.0f, crossThick / 2.0f);
+                        bar2.setOrigin(crossLen / 2.0f, crossThick / 2.0f);
+                        bar1.setPosition(px, py);
+                        bar2.setPosition(px, py);
+                        bar1.setRotation(45.0f);
+                        bar2.setRotation(-45.0f);
+                        bar1.setFillColor(deathColor); 
+                        bar2.setFillColor(deathColor);
+                        gameBuffer.draw(bar1); 
+                        gameBuffer.draw(bar2);
+                    }
+                }
+
+                // --- D) TRAILS ---
+                for (size_t i = 0; i < trails.size(); ++i) {
+                    const auto& pts = trails[i].points;
+                    if (pts.size() < 2) continue; 
+
+                    sf::VertexArray glowVA(sf::Quads);
+                    sf::VertexArray coreVA(sf::Quads);
+                    float baseWidth = physics.currentRacerSize * physics.SCALE; 
+
+                    for (size_t j = 1; j < pts.size(); ++j) {
+                        sf::Vector2f p1 = pts[j-1];
+                        sf::Vector2f p2 = pts[j];
+
+                        sf::Vector2f dir = p2 - p1;
+                        float len = std::sqrt(dir.x*dir.x + dir.y*dir.y);
+                        if (len < 0.001f) continue;
+
+                        sf::Vector2f normal(-dir.y/len, dir.x/len);
+
+                        float lifePct1 = 1.0f - ((float)(j-1) / (float)pts.size());
+                        float lifePct2 = 1.0f - ((float)j / (float)pts.size());
+                        float widthPct1 = std::pow(lifePct1, 0.6f);
+                        float widthPct2 = std::pow(lifePct2, 0.6f);
+                        sf::Color baseColor = trails[i].color;
+
+                        auto getThermoColor = [&](float life, float alphaMult) -> sf::Color {
+                            sf::Color c;
+                            if (life >= 0.8f) { 
+                                c = sf::Color(245, 245, 245);
+                            } else if (life >= 0.3f) { 
+                                float t = (life - 0.3f) / 0.5f; 
+                                c = lerpColor(baseColor, sf::Color(245, 245, 245), t);
+                            } else { 
+                                float t = life / 0.3f; 
+                                sf::Color transparent(0, 0, 0, 0); 
+                                c = lerpColor(transparent, baseColor, t);
+                            }
+                            c.a = (sf::Uint8)(c.a * alphaMult);
+                            return c;
+                        };
+
+                        sf::Color coreColor1 = getThermoColor(lifePct1, 0.85f);
+                        sf::Color coreColor2 = getThermoColor(lifePct2, 0.85f);
+                        sf::Color glowColor1 = getThermoColor(lifePct1, 0.35f);
+                        sf::Color glowColor2 = getThermoColor(lifePct2, 0.35f);
+
+                        float coreW1 = (baseWidth * 0.3f) * widthPct1;
+                        float coreW2 = (baseWidth * 0.3f) * widthPct2;
+                        float glowWidth = baseWidth * 1.6f;
+                        float glowW1 = (glowWidth * 0.4f) * widthPct1;
+                        float glowW2 = (glowWidth * 0.4f) * widthPct2;
+
+                        sf::Vector2f overlap = (dir / len) * (baseWidth * 0.08f);
+                        sf::Vector2f p1_ext = p1 - overlap;
+                        sf::Vector2f p2_ext = p2 + overlap;
+
+                        coreVA.append(sf::Vertex(p1_ext + normal * coreW1, coreColor1));
+                        coreVA.append(sf::Vertex(p1_ext - normal * coreW1, coreColor1));
+                        coreVA.append(sf::Vertex(p2_ext - normal * coreW2, coreColor2));
+                        coreVA.append(sf::Vertex(p2_ext + normal * coreW2, coreColor2));
+
+                        glowVA.append(sf::Vertex(p1_ext + normal * glowW1, glowColor1));
+                        glowVA.append(sf::Vertex(p1_ext - normal * glowW1, glowColor1));
+                        glowVA.append(sf::Vertex(p2_ext - normal * glowW2, glowColor2));
+                        glowVA.append(sf::Vertex(p2_ext + normal * glowW2, glowColor2));
+                    }
+
+                    sf::RenderStates states;
+                    states.blendMode = sf::BlendAdd;
+                    gameBuffer.draw(glowVA, states);
+                    gameBuffer.draw(coreVA, states);
+                }
+
+                // --- E) RACERS VIVOS ---
+                const auto& currentStatuses = physics.getRacerStatus(); 
+                for (size_t i = 0; i < bodies.size(); ++i) {
+                    if (i < currentStatuses.size() && !currentStatuses[i].isAlive) continue;
+                    b2Body* body = bodies[i];
+                    b2Vec2 pos = body->GetPosition();
+                    float angle = body->GetAngle();
+                    float drawSize = physics.currentRacerSize * physics.SCALE;
+                    
+                    sf::RectangleShape rect;
+                    rect.setSize(sf::Vector2f(drawSize, drawSize));
+                    rect.setOrigin(drawSize / 2.0f, drawSize / 2.0f);
+                    rect.setPosition(pos.x * physics.SCALE, pos.y * physics.SCALE);
+                    rect.setRotation(angle * 180.0f / 3.14159f);
+                    if (i < 4) rect.setOutlineColor(racerColors[i]);
+                    else rect.setOutlineColor(sf::Color::White);
+                    
+                    rect.setFillColor(sf::Color::White);
+                    rect.setOutlineThickness(-0.1f * physics.SCALE);
+                    gameBuffer.draw(rect); 
+                }
+            } // FIN CAPA -1
+
+            // ------------------------------------------
+            // CAPAS > -1: PAREDES CUSTOM
+            // ------------------------------------------
+            for (const auto& wall : customWalls) {
+                if (wall.zIndex != currentLayer) continue;
+
+                b2Vec2 pos = wall.body->GetPosition();
+                float wPx = wall.width * physics.SCALE;
+                float hPx = wall.height * physics.SCALE;
+                
+                sf::Shape* shapeToDraw = nullptr;
+                sf::RectangleShape rectShape;
+                sf::ConvexShape triShape;
+
+                if (wall.shapeType == 1) {
+                    triShape.setPointCount(3);
+                    triShape.setPoint(0, sf::Vector2f(0.0f, -hPx / 2.0f));       
+                    triShape.setPoint(1, sf::Vector2f(wPx / 2.0f, hPx / 2.0f));  
+                    triShape.setPoint(2, sf::Vector2f(-wPx / 2.0f, hPx / 2.0f)); 
+                    triShape.setPosition(pos.x * physics.SCALE, pos.y * physics.SCALE);
+                    triShape.setRotation(wall.body->GetAngle() * 180.0f / 3.14159f);
+                    shapeToDraw = &triShape;
+                } else {
+                    rectShape.setSize(sf::Vector2f(wPx, hPx));
+                    rectShape.setOrigin(wPx / 2.0f, hPx / 2.0f);
+                    rectShape.setPosition(pos.x * physics.SCALE, pos.y * physics.SCALE);
+                    rectShape.setRotation(wall.body->GetAngle() * 180.0f / 3.14159f);
+                    shapeToDraw = &rectShape;
+                }
+
+                sf::Color currentFill = lerpColor(wall.baseFillColor, wall.flashColor, wall.flashTimer);
+                sf::Color currentOutline = lerpColor(wall.neonColor, sf::Color::White, wall.flashTimer * 0.5f);
+
+                if (wall.isDeadly) {
+                    float dangerPulse = (std::sin(globalTime * 10.0f) + 1.0f) * 0.5f; 
+                    currentFill = sf::Color(100 + (dangerPulse * 50), 0, 0, 255); 
+                    currentOutline = sf::Color::Red;
+                }
+
+                shapeToDraw->setFillColor(currentFill); 
+                shapeToDraw->setOutlineColor(currentOutline);
+                
+                if (wall.borderSide != -1 || !wall.hasOutline) {
+                    shapeToDraw->setOutlineThickness(0.0f);
+                } else {
+                    float baseThickness = 0.08f * physics.SCALE; 
+                    float thickness = baseThickness + (wall.flashTimer * baseThickness);
+                    shapeToDraw->setOutlineThickness(-thickness);
+                }
+
+                gameBuffer.draw(*shapeToDraw);
+
+                // --- RENDERIZADO DE DAÑO Y VIDA ---
+                if (wall.isDestructible) {
+                    float halfW = wPx / 2.0f;
+                    float halfH = hPx / 2.0f;
+
+                    if (wall.currentHits < wall.maxHits) {
+                        int damageLevel = wall.maxHits - wall.currentHits;
+                        int numCracks = std::min(damageLevel, 200); 
+                        std::srand((unsigned int)(reinterpret_cast<std::uintptr_t>(wall.body) & 0xFFFFFFFF));
+                        
+                        auto drawCrackSegment = [&](float x1, float y1, float x2, float y2) {
+                            float dx = x2 - x1;
+                            float dy = y2 - y1;
+                            float length = std::sqrt(dx*dx + dy*dy);
+                            if (length < 0.5f) return; 
+                            
+                            float crackAngle = std::atan2(dy, dx) * 180.0f / 3.14159f;
+                            float crackThickness = std::max(4.0f, 0.036f * physics.SCALE); 
+                            
+                            sf::RectangleShape crackRect(sf::Vector2f(length, crackThickness));
+                            crackRect.setOrigin(0.0f, crackThickness / 2.0f);
+                            crackRect.setFillColor(sf::Color(10, 10, 10, 220)); 
+
+                            sf::Transform t;
+                            t.translate(pos.x * physics.SCALE, pos.y * physics.SCALE);
+                            t.rotate(wall.body->GetAngle() * 180.0f / 3.14159f);
+
+                            crackRect.setPosition(t.transformPoint(x1, y1));
+                            crackRect.setRotation((wall.body->GetAngle() * 180.0f / 3.14159f) + crackAngle);
+                            gameBuffer.draw(crackRect);
+                        };
+
+                        for (int k = 0; k < numCracks; k++) {
+                            float currentX = (std::rand() % (int)wPx) - halfW;
+                            float currentY = (std::rand() % (int)hPx) - halfH;
+                            float baseAngle = (std::rand() % 360) * 3.14159f / 180.0f;
+                            int segments = 2 + (std::rand() % 3); 
+                            
+                            for (int s = 0; s < segments; s++) {
+                                float angle = baseAngle + ((std::rand() % 100) - 50) * 0.015f; 
+                                float maxDim = std::max(wPx, hPx);
+                                float segLen = maxDim * (0.05f + (std::rand() % 100) * 0.002f); 
+                                
+                                float nextX = currentX + std::cos(angle) * segLen;
+                                float nextY = currentY + std::sin(angle) * segLen;
+
+                                nextX = std::clamp(nextX, -halfW, halfW);
+                                nextY = std::clamp(nextY, -halfH, halfH);
+
+                                drawCrackSegment(currentX, currentY, nextX, nextY);
+
+                                currentX = nextX;
+                                currentY = nextY;
+                            }
+                        }
+                        std::srand(std::time(nullptr)); 
+                    }
+
+                    if (wall.useTextForHP) {
+                        sf::Text hitText;
+                        hitText.setFont(uiFont); 
+                        hitText.setString(std::to_string(wall.currentHits));
+                        
+                        float minDim = std::min(wPx, hPx);
+                        unsigned int calcSize = (unsigned int)(minDim * 0.6f);
+                        if (calcSize < 12) calcSize = 12; 
+                        hitText.setCharacterSize(calcSize); 
+                        hitText.setFillColor(sf::Color(255, 255, 255, 140)); 
+                        
+                        sf::FloatRect textRect = hitText.getLocalBounds();
+                        hitText.setOrigin(textRect.left + textRect.width / 2.0f, textRect.top + textRect.height / 2.0f);
+                        hitText.setPosition(pos.x * physics.SCALE, pos.y * physics.SCALE);
+                        
+                        float extraRotation = (hPx > wPx * 1.5f) ? 90.0f : 0.0f;
+                        hitText.setRotation(wall.body->GetAngle() * 180.0f / 3.14159f + extraRotation);
+                        gameBuffer.draw(hitText);
+                    } else {
+                        float ledBaseSize = 0.30f * physics.SCALE; 
+                        float spacing = 0.12f * physics.SCALE;
+                        bool vertical = (wPx < hPx);
+                        float mainLength = vertical ? hPx : wPx;
+                        float totalWidth = (wall.maxHits * ledBaseSize) + ((wall.maxHits - 1) * spacing);
+                        float scaleDown = 1.0f;
+                        if (totalWidth > mainLength * 0.85f) {
+                            scaleDown = (mainLength * 0.85f) / totalWidth;
+                        }
+                        
+                        float ledSize = ledBaseSize * scaleDown;
+                        float currentSpacing = spacing * scaleDown;
+                        float adjustedTotalWidth = (wall.maxHits * ledSize) + ((wall.maxHits - 1) * currentSpacing);
+
+                        float startX = vertical ? 0.0f : (-adjustedTotalWidth / 2.0f + ledSize / 2.0f);
+                        float startY = vertical ? (-adjustedTotalWidth / 2.0f + ledSize / 2.0f) : 0.0f;
+
+                        sf::Transform t;
+                        t.translate(pos.x * physics.SCALE, pos.y * physics.SCALE);
+                        t.rotate(wall.body->GetAngle() * 180.0f / 3.14159f);
+
+                        for (int k = 0; k < wall.maxHits; k++) {
+                            sf::RectangleShape led(sf::Vector2f(ledSize, ledSize));
+                            led.setOrigin(ledSize / 2.0f, ledSize / 2.0f);
+                            float lx = vertical ? startX : (startX + k * (ledSize + currentSpacing));
+                            float ly = vertical ? (startY + k * (ledSize + currentSpacing)) : startY;
+
+                            led.setPosition(t.transformPoint(lx, ly));
+                            led.setRotation(wall.body->GetAngle() * 180.0f / 3.14159f);
+
+                            if (k < wall.currentHits) {
+                                led.setFillColor(sf::Color(100, 255, 100, 220)); 
+                            } else {
+                                led.setFillColor(sf::Color(255, 50, 50, 100)); 
+                            }
+                            gameBuffer.draw(led);
+                        }
+                    }
+                }
+            } // FIN BUCLE DE PAREDES
+        } // FIN BUCLE Z-INDEX
+
+        // ==============================================
+        // --- DRAW PARTÍCULAS (SIEMPRE ARRIBA) ---
+        // ==============================================
+        const auto& particles = physics.getParticles();
+        if (!particles.empty()) {
+            sf::VertexArray va(sf::Quads, particles.size() * 4);
+            float pSize = (RENDER_WIDTH / 1080.0f) * 4.0f; 
+            
+            for (size_t i = 0; i < particles.size(); ++i) {
+                const auto& p = particles[i];
+                sf::Color c = p.color;
+                c.a = (sf::Uint8)(255.0f * (p.life / p.maxLife));
+                
+                va[i*4 + 0].position = p.position + sf::Vector2f(-pSize, -pSize);
+                va[i*4 + 1].position = p.position + sf::Vector2f(pSize, -pSize);
+                va[i*4 + 2].position = p.position + sf::Vector2f(pSize, pSize);
+                va[i*4 + 3].position = p.position + sf::Vector2f(-pSize, pSize);
+                
+                va[i*4 + 0].color = c;
+                va[i*4 + 1].color = c;
+                va[i*4 + 2].color = c;
+                va[i*4 + 3].color = c;
             }
-            gameBuffer.draw(led);
+            gameBuffer.draw(va);
         }
-    }
-}
 
-        // ==========================================
-        // DIBUJAR GIZMOS SOBRE EL OBJETO SELECCIONADO
-        // ==========================================
+        // ==============================================
+        // --- DIBUJAR GIZMOS (UI DEL EDITOR, CAPA ABSOLUTA) ---
+        // ==============================================
         if (selectedType == EntityType::Wall && selectedIndex >= 0 && selectedIndex < customWalls.size()) {
             const CustomWall& w = customWalls[selectedIndex];
             b2Vec2 pos = w.body->GetPosition();
@@ -1244,7 +1525,7 @@ if (!physics.isPaused) {
             bbox.setRotation(rot * 180.0f / 3.14159f);
             bbox.setFillColor(sf::Color(255, 255, 255, 10));
             bbox.setOutlineColor(sf::Color(255, 255, 255, 150));
-            bbox.setOutlineThickness(1.0f);
+            bbox.setOutlineThickness(1.5f);
             gameBuffer.draw(bbox);
 
             sf::Transform t;
@@ -1260,14 +1541,13 @@ if (!physics.isPaused) {
             lineToRot[0].color = sf::Color(255, 150, 0); lineToRot[1].color = sf::Color(255, 150, 0);
             gameBuffer.draw(lineToRot);
 
-            // Círculo más chico
-            float rotRadius = (rotActive ? 0.35f : 0.2f) * physics.SCALE;
+            float rotRadius = (rotActive ? 0.4f : 0.3f) * physics.SCALE;
             sf::CircleShape rotCircle(rotRadius);
             rotCircle.setOrigin(rotRadius, rotRadius);
             rotCircle.setPosition(rotHandlePx);
             rotCircle.setFillColor(rotActive ? sf::Color(255, 150, 0, 180) : sf::Color(255, 150, 0, 100));
             rotCircle.setOutlineColor(sf::Color(255, 150, 0));
-            rotCircle.setOutlineThickness(1.0f);
+            rotCircle.setOutlineThickness(1.5f);
             gameBuffer.draw(rotCircle);
 
             sf::Vector2f cornersPx[4] = {
@@ -1279,16 +1559,14 @@ if (!physics.isPaused) {
 
             for (int i = 0; i < 4; i++) {
                 bool isHovered = (currentGizmo == GizmoState::Scaling && activeScaleCorner == i) || (currentGizmo == GizmoState::None && hoveredScaleCorner == i);
-                
-                // Cuadrados más chicos
-                float scaleSize = (isHovered ? 0.35f : 0.2f) * physics.SCALE;
+                float scaleSize = (isHovered ? 0.4f : 0.25f) * physics.SCALE;
                 sf::RectangleShape scaleRect(sf::Vector2f(scaleSize, scaleSize));
                 scaleRect.setOrigin(scaleSize / 2.0f, scaleSize / 2.0f);
                 scaleRect.setPosition(cornersPx[i]);
                 scaleRect.setRotation(rot * 180.0f / 3.14159f);
                 scaleRect.setFillColor(isHovered ? sf::Color(0, 255, 100, 200) : sf::Color(0, 255, 100, 100));
                 scaleRect.setOutlineColor(sf::Color(0, 255, 100));
-                scaleRect.setOutlineThickness(1.0f);
+                scaleRect.setOutlineThickness(1.5f);
                 gameBuffer.draw(scaleRect);
             }
         } 
@@ -1303,7 +1581,7 @@ if (!physics.isPaused) {
             bbox.setPosition(xPx, yPx);
             bbox.setFillColor(sf::Color(255, 255, 255, 10));
             bbox.setOutlineColor(sf::Color(255, 255, 255, 150));
-            bbox.setOutlineThickness(1.0f);
+            bbox.setOutlineThickness(1.5f);
             gameBuffer.draw(bbox);
 
             sf::Vector2f cornersPx[4] = {
@@ -1315,15 +1593,13 @@ if (!physics.isPaused) {
 
             for (int i = 0; i < 4; i++) {
                 bool isHovered = (currentGizmo == GizmoState::Scaling && activeScaleCorner == i) || (currentGizmo == GizmoState::None && hoveredScaleCorner == i);
-                
-                // Cuadrados más chicos también en la WinZone
-                float scaleSize = (isHovered ? 0.35f : 0.2f) * physics.SCALE;
+                float scaleSize = (isHovered ? 0.4f : 0.25f) * physics.SCALE;
                 sf::RectangleShape scaleRect(sf::Vector2f(scaleSize, scaleSize));
                 scaleRect.setOrigin(scaleSize / 2.0f, scaleSize / 2.0f);
                 scaleRect.setPosition(cornersPx[i]);
                 scaleRect.setFillColor(isHovered ? sf::Color(0, 255, 100, 200) : sf::Color(0, 255, 100, 100));
                 scaleRect.setOutlineColor(sf::Color(0, 255, 100));
-                scaleRect.setOutlineThickness(1.0f);
+                scaleRect.setOutlineThickness(1.5f);
                 gameBuffer.draw(scaleRect);
             }
         }
@@ -1337,289 +1613,8 @@ if (!physics.isPaused) {
             bbox.setRotation(b->GetAngle() * 180.0f / 3.14159f);
             bbox.setFillColor(sf::Color::Transparent);
             bbox.setOutlineColor(sf::Color::White);
-            bbox.setOutlineThickness(1.0f);
+            bbox.setOutlineThickness(2.0f);
             gameBuffer.draw(bbox);
-        }
-
-        // --- DIBUJO DE CUCHILLOS ---
-        for (const auto& knife : physics.getKnives()) {
-            
-            sf::Vector2f drawPos;
-            float drawRot;
-            float kScale = 1.5f * physics.SCALE; // Tamaño visual base (1 metro en el juego)
-
-            if (!knife.isPickedUp) {
-                // Si está tirado, está en su posición. 
-                // Rotación en 0 (no da vueltas solo) a menos que vos se la setees.
-                drawPos = sf::Vector2f(knife.body->GetPosition().x * physics.SCALE, knife.body->GetPosition().y * physics.SCALE);
-                drawRot = knife.body->GetAngle() * 180.0f / 3.14159f; 
-            } else {
-                // Si alguien lo tiene, lo pegamos al costado/frente del racer
-                int oIdx = knife.ownerIndex;
-                if (oIdx >= 0 && oIdx < bodies.size()) {
-                    b2Body* ownerBody = bodies[oIdx];
-                    b2Vec2 oPos = ownerBody->GetPosition();
-                    float oAngle = ownerBody->GetAngle();
-
-                    // Offset matemático para que parezca que lo lleva en la "mano"
-                    float rSize = physics.currentRacerSize / 2.0f; 
-                    b2Vec2 offset(cos(oAngle) * (rSize + 0.3f), sin(oAngle) * (rSize + 0.3f));
-                    
-                    drawPos = sf::Vector2f((oPos.x + offset.x) * physics.SCALE, (oPos.y + offset.y) * physics.SCALE);
-                    drawRot = oAngle * 180.0f / 3.14159f; // Apunta a donde va el racer
-                } else {
-                    continue; // Por seguridad
-                }
-            }
-
-            // DIBUJO: Asset vs Fallback
-            if (hasKnifeTex) {
-                sf::Sprite s(knifeTex);
-                // Ponemos el origen en el centro del 499x499
-                s.setOrigin(knifeTex.getSize().x / 2.0f, knifeTex.getSize().y / 2.0f);
-                
-                // Escala mágica: Si la imagen es de 499px, queremos que mida kScale (ej: 30px)
-                float scaleFactor = kScale / knifeTex.getSize().x;
-                s.setScale(-scaleFactor, scaleFactor);
-                
-                s.setPosition(drawPos);
-                s.setRotation(drawRot);
-                gameBuffer.draw(s);
-            } else {
-                // Fallback: Tu hoja roja
-                sf::ConvexShape tri;
-                tri.setPointCount(3);
-                float triSize = kScale * 0.6f; 
-                tri.setPoint(0, sf::Vector2f(0.0f, -triSize));
-                tri.setPoint(1, sf::Vector2f(triSize/2.0f, triSize/2.0f));
-                tri.setPoint(2, sf::Vector2f(-triSize/2.0f, triSize/2.0f));
-                
-                tri.setPosition(drawPos);
-                // Le sumamos 90 grados para que la punta del triángulo mire hacia donde viaja
-                tri.setRotation(drawRot + 90.0f); 
-                tri.setFillColor(sf::Color(220, 220, 220));
-                tri.setOutlineColor(sf::Color::Red);
-                tri.setOutlineThickness(2.0f);
-                
-                gameBuffer.draw(tri);
-            }
-        }
-
-            b2Body* zone = physics.getWinZoneBody();
-            if (zone) {
-                b2Vec2 pos = zone->GetPosition();
-                sf::RectangleShape zoneRect;
-                float w = physics.winZoneSize[0] * physics.SCALE;
-                float h = physics.winZoneSize[1] * physics.SCALE;
-                
-                // --- NUEVA LÓGICA DE GLOW GUARDABLE ---
-                float alpha = 100.0f; // Alpha estático por defecto
-                if (physics.winZoneGlow) {
-                    float pulse = (std::sin(globalTime * 1.5f) + 1.0f) * 0.5f; 
-                    alpha = 50.0f + pulse * 100.0f; // Pulso activo
-                }
-                
-                zoneRect.setSize(sf::Vector2f(w, h));
-                zoneRect.setOrigin(w/2.0f, h/2.0f);
-                zoneRect.setPosition(pos.x * physics.SCALE, pos.y * physics.SCALE);
-                zoneRect.setFillColor(sf::Color(255, 215, 0, (sf::Uint8)alpha)); 
-                zoneRect.setOutlineColor(sf::Color::Yellow);
-                zoneRect.setOutlineThickness(0.1f * physics.SCALE); 
-                gameBuffer.draw(zoneRect);
-            }
-        }
-
-        const auto& statuses = physics.getRacerStatus();
-        float tombSize = 0.8f * physics.SCALE;  // 1.0 metros en escala visual
-        float crossThick = 0.15f * physics.SCALE; // Grosor de la cruz
-        float outlineThick = 0.08f * physics.SCALE;
-
-        for (size_t i = 0; i < statuses.size(); ++i) {
-            const auto& status = statuses[i];
-
-            if (!status.isAlive) {
-                float px = status.deathPos.x * physics.SCALE;
-                float py = status.deathPos.y * physics.SCALE;
-
-                sf::Color deathColor = (i < 4) ? racerColors[i] : sf::Color::White;
-
-                sf::RectangleShape grave;
-                grave.setSize(sf::Vector2f(tombSize, tombSize));
-                grave.setOrigin(tombSize / 2.0f, tombSize / 2.0f);
-                grave.setPosition(px, py);
-                grave.setFillColor(sf::Color(20, 20, 20, 240)); 
-                grave.setOutlineColor(deathColor);              
-                grave.setOutlineThickness(outlineThick);
-                gameBuffer.draw(grave); 
-
-            
-                float crossLen = tombSize * 0.8f;      
-
-                sf::RectangleShape bar1(sf::Vector2f(crossLen, crossThick));
-                sf::RectangleShape bar2(sf::Vector2f(crossLen, crossThick));
-
-                bar1.setOrigin(crossLen / 2.0f, crossThick / 2.0f);
-                bar2.setOrigin(crossLen / 2.0f, crossThick / 2.0f);
-
-                bar1.setPosition(px, py);
-                bar2.setPosition(px, py);
-
-                bar1.setRotation(45.0f);
-                bar2.setRotation(-45.0f);
-
-                bar1.setFillColor(deathColor); 
-                bar2.setFillColor(deathColor);
-
-                gameBuffer.draw(bar1); 
-                gameBuffer.draw(bar2);
-            }
-        }
-
-        for (size_t i = 0; i < trails.size(); ++i) {
-            const auto& pts = trails[i].points;
-            if (pts.size() < 2) continue; 
-
-            // Usamos Quads en lugar de TriangleStrip para evitar "tajos" en curvas cerradas
-            sf::VertexArray glowVA(sf::Quads);
-            sf::VertexArray coreVA(sf::Quads);
-            
-            // Ancho constante, clavado al tamaño del racer
-            float baseWidth = physics.currentRacerSize * physics.SCALE; 
-
-for (size_t j = 1; j < pts.size(); ++j) {
-                sf::Vector2f p1 = pts[j-1];
-                sf::Vector2f p2 = pts[j];
-
-                sf::Vector2f dir = p2 - p1;
-                float len = std::sqrt(dir.x*dir.x + dir.y*dir.y);
-                if (len < 0.001f) continue;
-
-                sf::Vector2f normal(-dir.y/len, dir.x/len);
-
-                // Cálculo de vida (0.0 a 1.0) para ir apagando la luz
-                float lifePct1 = 1.0f - ((float)(j-1) / (float)pts.size());
-                float lifePct2 = 1.0f - ((float)j / (float)pts.size());
-
-                // Anchos afinándose hacia la punta
-                float widthPct1 = std::pow(lifePct1, 0.6f);
-                float widthPct2 = std::pow(lifePct2, 0.6f);
-
-                sf::Color baseColor = trails[i].color;
-
-                // --- MAGIA TERMODINÁMICA ---
-                // Lambda para calcular el color según la "edad" de la estela
-                auto getThermoColor = [&](float life, float alphaMult) -> sf::Color {
-                    sf::Color c;
-                    if (life >= 0.8f) { 
-                        // 0% a 20% de edad: Blanco incandescente (apenas apagado para no quemar)
-                        c = sf::Color(245, 245, 245);
-                    } else if (life >= 0.3f) { 
-                        // 20% a 70% de edad: Transición Blanco -> Color Base
-                        float t = (life - 0.3f) / 0.5f; 
-                        c = lerpColor(baseColor, sf::Color(245, 245, 245), t);
-                    } else { 
-                        // 70% a 100% de edad: Transición Color Base -> Transparente
-                        float t = life / 0.3f; 
-                        sf::Color transparent(0, 0, 0, 0); 
-                        c = lerpColor(transparent, baseColor, t);
-                    }
-                    
-                    // Ajustamos la opacidad para controlar el brillo en el BlendAdd
-                    c.a = (sf::Uint8)(c.a * alphaMult);
-                    return c;
-                };
-
-                // Aplicamos la termodinámica con un poquito menos de nafta
-                // Core: 0.85f (antes 1.0), Glow: 0.35f (antes 0.45)
-                sf::Color coreColor1 = getThermoColor(lifePct1, 0.85f);
-                sf::Color coreColor2 = getThermoColor(lifePct2, 0.85f);
-                
-                sf::Color glowColor1 = getThermoColor(lifePct1, 0.35f);
-                sf::Color glowColor2 = getThermoColor(lifePct2, 0.35f);
-
-                // Calculamos los anchos dinámicos (que terminen en punta)
-                float coreW1 = (baseWidth * 0.3f) * widthPct1;
-                float coreW2 = (baseWidth * 0.3f) * widthPct2;
-                
-                float glowWidth = baseWidth * 1.6f;
-                float glowW1 = (glowWidth * 0.4f) * widthPct1;
-                float glowW2 = (glowWidth * 0.4f) * widthPct2;
-
-                // SOLAPAMIENTO SUTIL (Overlap)
-                sf::Vector2f overlap = (dir / len) * (baseWidth * 0.08f);
-                sf::Vector2f p1_ext = p1 - overlap;
-                sf::Vector2f p2_ext = p2 + overlap;
-
-                // Vértices del Core (Afinándose hacia atrás)
-                coreVA.append(sf::Vertex(p1_ext + normal * coreW1, coreColor1));
-                coreVA.append(sf::Vertex(p1_ext - normal * coreW1, coreColor1));
-                coreVA.append(sf::Vertex(p2_ext - normal * coreW2, coreColor2));
-                coreVA.append(sf::Vertex(p2_ext + normal * coreW2, coreColor2));
-
-                // Vértices del Glow (Afinándose hacia atrás)
-                glowVA.append(sf::Vertex(p1_ext + normal * glowW1, glowColor1));
-                glowVA.append(sf::Vertex(p1_ext - normal * glowW1, glowColor1));
-                glowVA.append(sf::Vertex(p2_ext - normal * glowW2, glowColor2));
-                glowVA.append(sf::Vertex(p2_ext + normal * glowW2, glowColor2));
-            }
-
-            // MAGIA ACÁ: Fusión Aditiva (BlendAdd). 
-            // En vez de tapar lo que hay abajo, suma luz. El shader de Bloom se hace un festín.
-            sf::RenderStates states;
-            states.blendMode = sf::BlendAdd;
-            
-            gameBuffer.draw(glowVA, states);
-            gameBuffer.draw(coreVA, states);
-        }
-
-        const auto& currentStatuses = physics.getRacerStatus(); 
-
-        for (size_t i = 0; i < bodies.size(); ++i) {
-            if (i < currentStatuses.size() && !currentStatuses[i].isAlive) continue;
-            b2Body* body = bodies[i];
-            b2Vec2 pos = body->GetPosition();
-            float angle = body->GetAngle();
-            float drawSize = physics.currentRacerSize * physics.SCALE;
-            sf::RectangleShape rect;
-            rect.setSize(sf::Vector2f(drawSize, drawSize));
-            rect.setOrigin(drawSize / 2.0f, drawSize / 2.0f);
-            rect.setPosition(pos.x * physics.SCALE, pos.y * physics.SCALE);
-            rect.setRotation(angle * 180.0f / 3.14159f);
-            if (i < 4) rect.setOutlineColor(racerColors[i]);
-            else rect.setOutlineColor(sf::Color::White);
-            rect.setFillColor(sf::Color::White);
-            rect.setOutlineThickness(-0.1f * physics.SCALE);
-            gameBuffer.draw(rect); 
-        }
-
-        // --- DRAW PARTÍCULAS ---
-        const auto& particles = physics.getParticles();
-        if (!particles.empty()) {
-            // Usamos Quads, necesitamos 4 vértices por partícula
-            sf::VertexArray va(sf::Quads, particles.size() * 4);
-            
-            // Tamaño de la partícula escalado a la resolución bruta (2160p)
-            float pSize = (RENDER_WIDTH / 1080.0f) * 4.0f; 
-            
-            for (size_t i = 0; i < particles.size(); ++i) {
-                const auto& p = particles[i];
-                sf::Color c = p.color;
-                
-                // Hacemos que se desvanezcan en el canal Alpha según su vida
-                c.a = (sf::Uint8)(255.0f * (p.life / p.maxLife));
-                
-                // Construimos el cuadradito
-                va[i*4 + 0].position = p.position + sf::Vector2f(-pSize, -pSize);
-                va[i*4 + 1].position = p.position + sf::Vector2f(pSize, -pSize);
-                va[i*4 + 2].position = p.position + sf::Vector2f(pSize, pSize);
-                va[i*4 + 3].position = p.position + sf::Vector2f(-pSize, pSize);
-                
-                va[i*4 + 0].color = c;
-                va[i*4 + 1].color = c;
-                va[i*4 + 2].color = c;
-                va[i*4 + 3].color = c;
-            }
-            gameBuffer.draw(va);
         }
 
         gameBuffer.display();

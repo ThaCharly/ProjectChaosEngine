@@ -920,6 +920,7 @@ void PhysicsWorld::updateCustomWall(int index, float x, float y, float w, float 
 
 void PhysicsWorld::removeCustomWall(int index) {
     if (index < 0 || index >= customWalls.size()) return;
+    if (customWalls[index].borderSide != -1) return; // No borres muros de borde
     world.DestroyBody(customWalls[index].body);
     customWalls.erase(customWalls.begin() + index);
 }
@@ -1225,21 +1226,40 @@ void PhysicsWorld::duplicateCustomWall(int index) {
 }
 
 void PhysicsWorld::createWalls(float widthPixels, float heightPixels) {
-    float width = worldWidthMeters;
-    float height = worldHeightMeters;
+    mapWidth = worldWidthMeters;
+    mapHeight = worldHeightMeters;
     float thick = 0.5f;
 
     // AHORA LAS PAREDES DEL BORDE TIENEN SONIDO Y COLOR
-    // ID 1: Cyan (Piso)
-    // ID 2: Magenta (Techo)
-    // ID 3: Lime (Izq)
-    // ID 4: Orange (Der)
+    addCustomWall(mapWidth / 2.0f, mapHeight, mapWidth, thick, 1); // Piso
+    customWalls.back().borderSide = 0;
     
-    addCustomWall(width / 2.0f, height, width / 2.0f, thick, 1); // Piso
-    addCustomWall(width / 2.0f, 0.0f, width / 2.0f, thick, 2);   // Techo
-    addCustomWall(0.0f, height / 2.0f, thick, height / 2.0f, 3); // Izq
-    addCustomWall(width, height / 2.0f, thick, height / 2.0f, 4);// Der
+    addCustomWall(mapWidth / 2.0f, 0.0f, mapWidth, thick, 1);   // Techo
+    customWalls.back().borderSide = 1;
+    
+    addCustomWall(0.0f, mapHeight / 2.0f, thick, mapHeight, 1); // Izq
+    customWalls.back().borderSide = 2;
+    
+    addCustomWall(mapWidth, mapHeight / 2.0f, thick, mapHeight, 1);// Der
+    customWalls.back().borderSide = 3;
 }
+
+void PhysicsWorld::updateMapBounds(float newW, float newH) {
+    mapWidth = newW;
+    mapHeight = newH;
+    float thick = 0.5f;
+    
+    for (size_t i = 0; i < customWalls.size(); i++) {
+        CustomWall& w = customWalls[i];
+        // Si es un borde, le recalculamos tamaño y posición en caliente usando tu propia función
+        if (w.borderSide == 0) updateCustomWall(i, mapWidth / 2.0f, mapHeight, mapWidth, thick, w.soundID, w.shapeType, w.rotation);
+        else if (w.borderSide == 1) updateCustomWall(i, mapWidth / 2.0f, 0.0f, mapWidth, thick, w.soundID, w.shapeType, w.rotation);
+        else if (w.borderSide == 2) updateCustomWall(i, 0.0f, mapHeight / 2.0f, thick, mapHeight, w.soundID, w.shapeType, w.rotation);
+        else if (w.borderSide == 3) updateCustomWall(i, mapWidth, mapHeight / 2.0f, thick, mapHeight, w.soundID, w.shapeType, w.rotation);
+    }
+}
+
+
 void PhysicsWorld::createRacers() { 
     float s = currentRacerSize; 
     b2PolygonShape b; 
