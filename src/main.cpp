@@ -341,55 +341,83 @@ int main()
                 return b2Vec2(dx * c + dy * s, -dx * s + dy * c);
             };
 
-            // --- DETECCIÓN DE HOVER ---
-            if (currentGizmo == GizmoState::None && selectedType == EntityType::Wall && selectedIndex >= 0) {
-                CustomWall& w = physics.getCustomWalls()[selectedIndex];
-                
-                // Usamos la matemática interna de Box2D para sacar las coordenadas globales exactas. 
-                // Esto es una bala de plata contra cualquier desfasaje.
-                b2Vec2 rotHandleGlobal = w.body->GetWorldPoint(b2Vec2(0.0f, -w.height / 2.0f - 1.5f));
-                b2Vec2 corners[4] = {
-                    w.body->GetWorldPoint(b2Vec2(-w.width/2.0f, -w.height/2.0f)), // 0: TL
-                    w.body->GetWorldPoint(b2Vec2( w.width/2.0f, -w.height/2.0f)), // 1: TR
-                    w.body->GetWorldPoint(b2Vec2( w.width/2.0f,  w.height/2.0f)), // 2: BR
-                    w.body->GetWorldPoint(b2Vec2(-w.width/2.0f,  w.height/2.0f))  // 3: BL
-                };
+            // --- DETECCIÓN DE HOVER (Cursores y Gizmos) ---
+            if (currentGizmo == GizmoState::None) {
+                if (selectedType == EntityType::Wall && selectedIndex >= 0 && selectedIndex < physics.getCustomWalls().size()) {
+                    CustomWall& w = physics.getCustomWalls()[selectedIndex];
+                    b2Vec2 rotHandleGlobal = w.body->GetWorldPoint(b2Vec2(0.0f, -w.height / 2.0f - 1.5f));
+                    b2Vec2 corners[4] = {
+                        w.body->GetWorldPoint(b2Vec2(-w.width/2.0f, -w.height/2.0f)), // TL
+                        w.body->GetWorldPoint(b2Vec2( w.width/2.0f, -w.height/2.0f)), // TR
+                        w.body->GetWorldPoint(b2Vec2( w.width/2.0f,  w.height/2.0f)), // BR
+                        w.body->GetWorldPoint(b2Vec2(-w.width/2.0f,  w.height/2.0f))  // BL
+                    };
 
-                // HITBOXES AGRANDADAS: Ahora detecta a 1 metro para rotar y a 0.8 metros para escalar
-                // pero el dibujo va a seguir siendo chiquito y prolijo.
-                if ((mouseB2 - rotHandleGlobal).Length() < 1.0f) {
-                    isHoveringRotate = true;
-                } else {
+                    // Hitbox gigante invisible de 1.5 metros
+                    if ((mouseB2 - rotHandleGlobal).Length() < 1.5f) {
+                        isHoveringRotate = true;
+                    } else {
+                        float minDist = 1.5f; 
+                        for (int c = 0; c < 4; c++) {
+                            float dist = (mouseB2 - corners[c]).Length();
+                            if (dist < minDist) { 
+                                hoveredScaleCorner = c; 
+                                minDist = dist; // Nos quedamos con la esquina más cercana al mouse
+                            }
+                        }
+                    }
+                } 
+                else if (selectedType == EntityType::WinZone) {
+                    float wzW = physics.winZoneSize[0];
+                    float wzH = physics.winZoneSize[1];
+                    b2Vec2 wzPos(physics.winZonePos[0], physics.winZonePos[1]);
+                    b2Vec2 corners[4] = {
+                        wzPos + b2Vec2(-wzW/2.0f, -wzH/2.0f),
+                        wzPos + b2Vec2( wzW/2.0f, -wzH/2.0f),
+                        wzPos + b2Vec2( wzW/2.0f,  wzH/2.0f),
+                        wzPos + b2Vec2(-wzW/2.0f,  wzH/2.0f)
+                    };
+
+                    float minDist = 1.5f;
                     for (int c = 0; c < 4; c++) {
-                        if ((mouseB2 - corners[c]).Length() < 0.8f) {
-                            hoveredScaleCorner = c;
-                            break;
+                        float dist = (mouseB2 - corners[c]).Length();
+                        if (dist < minDist) { 
+                            hoveredScaleCorner = c; 
+                            minDist = dist; 
                         }
                     }
                 }
-                
+
+                // Fallback para cursor de Mover (si no tocamos ningún pincho)
                 if (!isHoveringRotate && hoveredScaleCorner == -1) {
-                    if (physics.getWallAtPoint(box2dX, box2dY) == selectedIndex) isHoveringMove = true;
+                    int hoveredRacer = -1;
+                    for (int i = 0; i < bodies.size(); ++i) {
+                        if ((mouseB2 - bodies[i]->GetPosition()).Length() < physics.currentRacerSize / 2.0f) { hoveredRacer = i; break; }
+                    }
+                    
+                    if (hoveredRacer != -1) isHoveringMove = true;
+                    else if (physics.getWallAtPoint(box2dX, box2dY) != -1) isHoveringMove = true;
+                    else if (std::abs(mouseB2.x - physics.winZonePos[0]) <= physics.winZoneSize[0]/2.0f && std::abs(mouseB2.y - physics.winZonePos[1]) <= physics.winZoneSize[1]/2.0f) isHoveringMove = true;
                 }
             }
 
-            // --- APLICACIÓN DE CURSORES ---
+            // --- APLICACIÓN DE CURSORES DINÁMICOS ---
             int cursorCorner = (currentGizmo == GizmoState::Scaling) ? activeScaleCorner : hoveredScaleCorner;
             if (cursorCorner == 0 || cursorCorner == 2) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNWSE);
             else if (cursorCorner == 1 || cursorCorner == 3) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNESW);
             else if (currentGizmo == GizmoState::Rotating || isHoveringRotate) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
             else if (currentGizmo == GizmoState::Moving || isHoveringMove) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
 
-            // --- LÓGICA DE CLICS ---
+            // --- LÓGICA DE CLICS Y ARRASTRE ---
             if (sf::Mouse::isButtonPressed(sf::Mouse::Left)) {
                 if (currentGizmo == GizmoState::None) {
                     bool handleClicked = false;
+                    
+                    // 1. Chequeamos si tocamos un Gizmo activo del objeto seleccionado
                     if (selectedType == EntityType::Wall && selectedIndex >= 0) {
                         CustomWall& w = physics.getCustomWalls()[selectedIndex];
-                        
                         if (isHoveringRotate) {
                             currentGizmo = GizmoState::Rotating;
-                            // Guardamos el ángulo absoluto de la pared y el vector del mouse en ESTE frame
                             initialMouseAngle = std::atan2(mouseB2.y - w.body->GetPosition().y, mouseB2.x - w.body->GetPosition().x);
                             initialRotation = w.body->GetAngle();
                             handleClicked = true;
@@ -399,68 +427,116 @@ int main()
                             initialPos = w.body->GetPosition();
                             initialWidth = w.width;
                             initialHeight = w.height;
-                            // Registramos dónde estaba el mouse localmente al hacer clic
                             initialMouseLocal = toLocal(mouseB2, initialPos, w.body->GetAngle());
                             handleClicked = true;
                         }
+                    } else if (selectedType == EntityType::WinZone && hoveredScaleCorner != -1) {
+                        currentGizmo = GizmoState::Scaling;
+                        activeScaleCorner = hoveredScaleCorner;
+                        initialPos = b2Vec2(physics.winZonePos[0], physics.winZonePos[1]);
+                        initialWidth = physics.winZoneSize[0];
+                        initialHeight = physics.winZoneSize[1];
+                        initialMouseLocal = mouseB2 - initialPos; // AABB no rota, es directo
+                        handleClicked = true;
                     }
 
+                    // 2. Si no tocamos gizmos, priorizamos la selección física de cuerpos (Z-Index inverso)
                     if (!handleClicked) {
-                        int clickedWall = physics.getWallAtPoint(box2dX, box2dY);
-                        if (clickedWall != -1) {
-                            selectedType = EntityType::Wall;
-                            selectedIndex = clickedWall;
+                        int clickedRacer = -1;
+                        for (int i = 0; i < bodies.size(); ++i) {
+                            if ((mouseB2 - bodies[i]->GetPosition()).Length() < physics.currentRacerSize / 2.0f) { clickedRacer = i; break; }
+                        }
+
+                        if (clickedRacer != -1) {
+                            selectedType = EntityType::Racers;
+                            selectedIndex = clickedRacer; // Usamos el index para saber cuál arrastramos
                             currentGizmo = GizmoState::Moving;
-                            b2Vec2 objPos = physics.getCustomWalls()[clickedWall].body->GetPosition();
-                            dragOffset = b2Vec2(box2dX - objPos.x, box2dY - objPos.y);
+                            dragOffset = mouseB2 - bodies[clickedRacer]->GetPosition();
                         } else {
-                            selectedType = EntityType::None;
-                            selectedIndex = -1;
+                            int clickedWall = physics.getWallAtPoint(box2dX, box2dY);
+                            if (clickedWall != -1) {
+                                selectedType = EntityType::Wall;
+                                selectedIndex = clickedWall;
+                                currentGizmo = GizmoState::Moving;
+                                b2Vec2 objPos = physics.getCustomWalls()[clickedWall].body->GetPosition();
+                                dragOffset = b2Vec2(box2dX - objPos.x, box2dY - objPos.y);
+                            } else if (std::abs(mouseB2.x - physics.winZonePos[0]) <= physics.winZoneSize[0]/2.0f && std::abs(mouseB2.y - physics.winZonePos[1]) <= physics.winZoneSize[1]/2.0f) {
+                                selectedType = EntityType::WinZone;
+                                currentGizmo = GizmoState::Moving;
+                                dragOffset = mouseB2 - b2Vec2(physics.winZonePos[0], physics.winZonePos[1]);
+                            } else {
+                                selectedType = EntityType::None;
+                                selectedIndex = -1;
+                            }
                         }
                     }
                 } else {
                     // --- FASE DE ARRASTRE ---
-                    if (selectedType == EntityType::Wall && selectedIndex >= 0) {
-                        CustomWall& w = physics.getCustomWalls()[selectedIndex];
-                        b2Vec2 pos = w.body->GetPosition();
-
-                        if (currentGizmo == GizmoState::Moving) {
+                    if (currentGizmo == GizmoState::Moving) {
+                        if (selectedType == EntityType::Wall && selectedIndex >= 0) {
+                            CustomWall& w = physics.getCustomWalls()[selectedIndex];
                             w.body->SetTransform(b2Vec2(box2dX - dragOffset.x, box2dY - dragOffset.y), w.rotation);
+                            w.body->SetAwake(true);
                         } 
-                        else if (currentGizmo == GizmoState::Rotating) {
-                            // Sumamos el Delta Angular al ángulo inicial para evitar saltos
-                            float currentMouseAngle = std::atan2(mouseB2.y - pos.y, mouseB2.x - pos.x);
-                            float newAngle = initialRotation + (currentMouseAngle - initialMouseAngle);
-                            w.rotation = newAngle;
-                            w.body->SetTransform(pos, newAngle);
+                        else if (selectedType == EntityType::Racers && selectedIndex >= 0) {
+                            b2Body* b = bodies[selectedIndex];
+                            b->SetTransform(b2Vec2(box2dX - dragOffset.x, box2dY - dragOffset.y), b->GetAngle());
+                            b->SetLinearVelocity(b2Vec2(0.0f, 0.0f)); // Neutralizamos inercias si el tiempo corre
+                            b->SetAwake(true);
                         }
-                        else if (currentGizmo == GizmoState::Scaling) {
+                        else if (selectedType == EntityType::WinZone) {
+                            physics.winZonePos[0] = box2dX - dragOffset.x;
+                            physics.winZonePos[1] = box2dY - dragOffset.y;
+                            physics.updateWinZone(physics.winZonePos[0], physics.winZonePos[1], physics.winZoneSize[0], physics.winZoneSize[1]);
+                        }
+                    } 
+                    else if (currentGizmo == GizmoState::Rotating && selectedType == EntityType::Wall && selectedIndex >= 0) {
+                        CustomWall& w = physics.getCustomWalls()[selectedIndex];
+                        float currentMouseAngle = std::atan2(mouseB2.y - w.body->GetPosition().y, mouseB2.x - w.body->GetPosition().x);
+                        float newAngle = initialRotation + (currentMouseAngle - initialMouseAngle);
+                        w.rotation = newAngle;
+                        w.body->SetTransform(w.body->GetPosition(), newAngle);
+                        w.body->SetAwake(true);
+                    }
+                    else if (currentGizmo == GizmoState::Scaling) {
+                        float deltaX, deltaY;
+                        float sx = (activeScaleCorner == 1 || activeScaleCorner == 2) ? 1.0f : -1.0f;
+                        float sy = (activeScaleCorner == 2 || activeScaleCorner == 3) ? 1.0f : -1.0f;
+
+                        if (selectedType == EntityType::Wall && selectedIndex >= 0) {
+                            CustomWall& w = physics.getCustomWalls()[selectedIndex];
                             b2Vec2 currentMouseLocal = toLocal(mouseB2, initialPos, w.rotation);
-                            
-                            // Matemática de Delta: Cuánto se movió el mouse desde el clic inicial
-                            float deltaX = currentMouseLocal.x - initialMouseLocal.x;
-                            float deltaY = currentMouseLocal.y - initialMouseLocal.y;
+                            deltaX = currentMouseLocal.x - initialMouseLocal.x;
+                            deltaY = currentMouseLocal.y - initialMouseLocal.y;
 
-                            float sx = (activeScaleCorner == 1 || activeScaleCorner == 2) ? 1.0f : -1.0f;
-                            float sy = (activeScaleCorner == 2 || activeScaleCorner == 3) ? 1.0f : -1.0f;
-
-                            // Al tamaño inicial le sumamos o restamos el Delta
-                            float newW = initialWidth + (deltaX * sx);
-                            float newH = initialHeight + (deltaY * sy);
-
-                            if (newW < 0.5f) newW = 0.5f;
-                            if (newH < 0.5f) newH = 0.5f;
+                            float newW = std::max(0.5f, initialWidth + (deltaX * sx));
+                            float newH = std::max(0.5f, initialHeight + (deltaY * sy));
 
                             b2Vec2 fixedLocal(-sx * initialWidth / 2.0f, -sy * initialHeight / 2.0f);
-                            float actualCx = fixedLocal.x + sx * newW;
-                            float actualCy = fixedLocal.y + sy * newH;
-
-                            b2Vec2 newCenterLocal((fixedLocal.x + actualCx) / 2.0f, (fixedLocal.y + actualCy) / 2.0f);
+                            b2Vec2 newCenterLocal((fixedLocal.x + (fixedLocal.x + sx * newW)) / 2.0f, (fixedLocal.y + (fixedLocal.y + sy * newH)) / 2.0f);
                             b2Vec2 newCenterGlobal = toGlobal(newCenterLocal, initialPos, w.rotation);
 
                             physics.updateCustomWall(selectedIndex, newCenterGlobal.x, newCenterGlobal.y, newW, newH, w.soundID, w.shapeType, w.rotation);
+                            w.body->SetAwake(true);
+                        } 
+                        else if (selectedType == EntityType::WinZone) {
+                            b2Vec2 currentMouseLocal = mouseB2 - initialPos; // Sin rotar
+                            deltaX = currentMouseLocal.x - initialMouseLocal.x;
+                            deltaY = currentMouseLocal.y - initialMouseLocal.y;
+
+                            float newW = std::max(0.5f, initialWidth + (deltaX * sx));
+                            float newH = std::max(0.5f, initialHeight + (deltaY * sy));
+
+                            b2Vec2 fixedLocal(-sx * initialWidth / 2.0f, -sy * initialHeight / 2.0f);
+                            b2Vec2 newCenterLocal((fixedLocal.x + (fixedLocal.x + sx * newW)) / 2.0f, (fixedLocal.y + (fixedLocal.y + sy * newH)) / 2.0f);
+                            b2Vec2 newCenterGlobal = initialPos + newCenterLocal;
+
+                            physics.winZonePos[0] = newCenterGlobal.x;
+                            physics.winZonePos[1] = newCenterGlobal.y;
+                            physics.winZoneSize[0] = newW;
+                            physics.winZoneSize[1] = newH;
+                            physics.updateWinZone(physics.winZonePos[0], physics.winZonePos[1], physics.winZoneSize[0], physics.winZoneSize[1]);
                         }
-                        w.body->SetAwake(true);
                     }
                 }
             } else {
@@ -1159,71 +1235,110 @@ if (!physics.isPaused) {
             const CustomWall& w = customWalls[selectedIndex];
             b2Vec2 pos = w.body->GetPosition();
             float rot = w.body->GetAngle();
-            
             float wPx = w.width * physics.SCALE;
             float hPx = w.height * physics.SCALE;
 
-            // Bounding Box
             sf::RectangleShape bbox(sf::Vector2f(wPx, hPx));
             bbox.setOrigin(wPx / 2.0f, hPx / 2.0f);
             bbox.setPosition(pos.x * physics.SCALE, pos.y * physics.SCALE);
             bbox.setRotation(rot * 180.0f / 3.14159f);
-            bbox.setFillColor(sf::Color(255, 255, 255, 10)); // Más sutil
+            bbox.setFillColor(sf::Color(255, 255, 255, 10));
             bbox.setOutlineColor(sf::Color(255, 255, 255, 150));
-            bbox.setOutlineThickness(1.5f);
+            bbox.setOutlineThickness(1.0f);
             gameBuffer.draw(bbox);
 
-            // Creamos un Transform de SFML. Así dejamos que la librería calcule visualmente todo 
-            // y matamos el bug de rotación inversa por mezclar el eje Y de SFML con senos y cosenos a mano.
             sf::Transform t;
             t.translate(pos.x * physics.SCALE, pos.y * physics.SCALE);
             t.rotate(rot * 180.0f / 3.14159f);
 
-            // --- GIZMO DE ROTACIÓN ---
             bool rotActive = (currentGizmo == GizmoState::Rotating) || (currentGizmo == GizmoState::None && isHoveringRotate);
-            
             sf::Vector2f topEdgePx = t.transformPoint(0.0f, -hPx / 2.0f);
             sf::Vector2f rotHandlePx = t.transformPoint(0.0f, -hPx / 2.0f - 1.5f * physics.SCALE);
             
             sf::VertexArray lineToRot(sf::Lines, 2);
-            lineToRot[0].position = topEdgePx;
-            lineToRot[1].position = rotHandlePx;
-            lineToRot[0].color = sf::Color(255, 150, 0); 
-            lineToRot[1].color = sf::Color(255, 150, 0);
+            lineToRot[0].position = topEdgePx; lineToRot[1].position = rotHandlePx;
+            lineToRot[0].color = sf::Color(255, 150, 0); lineToRot[1].color = sf::Color(255, 150, 0);
             gameBuffer.draw(lineToRot);
 
-            float rotRadius = (rotActive ? 0.4f : 0.3f) * physics.SCALE;
+            // Círculo más chico
+            float rotRadius = (rotActive ? 0.35f : 0.2f) * physics.SCALE;
             sf::CircleShape rotCircle(rotRadius);
             rotCircle.setOrigin(rotRadius, rotRadius);
             rotCircle.setPosition(rotHandlePx);
             rotCircle.setFillColor(rotActive ? sf::Color(255, 150, 0, 180) : sf::Color(255, 150, 0, 100));
             rotCircle.setOutlineColor(sf::Color(255, 150, 0));
-            rotCircle.setOutlineThickness(1.5f);
+            rotCircle.setOutlineThickness(1.0f);
             gameBuffer.draw(rotCircle);
 
-            // --- GIZMOS DE ESCALA (Las 4 esquinas) ---
             sf::Vector2f cornersPx[4] = {
-                t.transformPoint(-wPx / 2.0f, -hPx / 2.0f), // TL
-                t.transformPoint( wPx / 2.0f, -hPx / 2.0f), // TR
-                t.transformPoint( wPx / 2.0f,  hPx / 2.0f), // BR
-                t.transformPoint(-wPx / 2.0f,  hPx / 2.0f)  // BL
+                t.transformPoint(-wPx / 2.0f, -hPx / 2.0f),
+                t.transformPoint( wPx / 2.0f, -hPx / 2.0f),
+                t.transformPoint( wPx / 2.0f,  hPx / 2.0f),
+                t.transformPoint(-wPx / 2.0f,  hPx / 2.0f)
             };
 
             for (int i = 0; i < 4; i++) {
-                bool isHovered = (currentGizmo == GizmoState::Scaling && activeScaleCorner == i) || 
-                                 (currentGizmo == GizmoState::None && hoveredScaleCorner == i);
+                bool isHovered = (currentGizmo == GizmoState::Scaling && activeScaleCorner == i) || (currentGizmo == GizmoState::None && hoveredScaleCorner == i);
                 
-                // Visualmente chiquitos, sin afectar la hitbox inmensa de Box2D
-                float scaleSize = (isHovered ? 0.4f : 0.25f) * physics.SCALE;
+                // Cuadrados más chicos
+                float scaleSize = (isHovered ? 0.35f : 0.2f) * physics.SCALE;
                 sf::RectangleShape scaleRect(sf::Vector2f(scaleSize, scaleSize));
                 scaleRect.setOrigin(scaleSize / 2.0f, scaleSize / 2.0f);
                 scaleRect.setPosition(cornersPx[i]);
                 scaleRect.setRotation(rot * 180.0f / 3.14159f);
                 scaleRect.setFillColor(isHovered ? sf::Color(0, 255, 100, 200) : sf::Color(0, 255, 100, 100));
                 scaleRect.setOutlineColor(sf::Color(0, 255, 100));
-                scaleRect.setOutlineThickness(1.5f);
+                scaleRect.setOutlineThickness(1.0f);
                 gameBuffer.draw(scaleRect);
             }
+        } 
+        else if (selectedType == EntityType::WinZone) {
+            float wPx = physics.winZoneSize[0] * physics.SCALE;
+            float hPx = physics.winZoneSize[1] * physics.SCALE;
+            float xPx = physics.winZonePos[0] * physics.SCALE;
+            float yPx = physics.winZonePos[1] * physics.SCALE;
+
+            sf::RectangleShape bbox(sf::Vector2f(wPx, hPx));
+            bbox.setOrigin(wPx / 2.0f, hPx / 2.0f);
+            bbox.setPosition(xPx, yPx);
+            bbox.setFillColor(sf::Color(255, 255, 255, 10));
+            bbox.setOutlineColor(sf::Color(255, 255, 255, 150));
+            bbox.setOutlineThickness(1.0f);
+            gameBuffer.draw(bbox);
+
+            sf::Vector2f cornersPx[4] = {
+                sf::Vector2f(xPx - wPx / 2.0f, yPx - hPx / 2.0f),
+                sf::Vector2f(xPx + wPx / 2.0f, yPx - hPx / 2.0f),
+                sf::Vector2f(xPx + wPx / 2.0f, yPx + hPx / 2.0f),
+                sf::Vector2f(xPx - wPx / 2.0f, yPx + hPx / 2.0f)
+            };
+
+            for (int i = 0; i < 4; i++) {
+                bool isHovered = (currentGizmo == GizmoState::Scaling && activeScaleCorner == i) || (currentGizmo == GizmoState::None && hoveredScaleCorner == i);
+                
+                // Cuadrados más chicos también en la WinZone
+                float scaleSize = (isHovered ? 0.35f : 0.2f) * physics.SCALE;
+                sf::RectangleShape scaleRect(sf::Vector2f(scaleSize, scaleSize));
+                scaleRect.setOrigin(scaleSize / 2.0f, scaleSize / 2.0f);
+                scaleRect.setPosition(cornersPx[i]);
+                scaleRect.setFillColor(isHovered ? sf::Color(0, 255, 100, 200) : sf::Color(0, 255, 100, 100));
+                scaleRect.setOutlineColor(sf::Color(0, 255, 100));
+                scaleRect.setOutlineThickness(1.0f);
+                gameBuffer.draw(scaleRect);
+            }
+        }
+        else if (selectedType == EntityType::Racers && selectedIndex >= 0 && selectedIndex < bodies.size()) {
+            b2Body* b = bodies[selectedIndex];
+            float rSize = physics.currentRacerSize * physics.SCALE + (0.3f * physics.SCALE); 
+            
+            sf::RectangleShape bbox(sf::Vector2f(rSize, rSize));
+            bbox.setOrigin(rSize / 2.0f, rSize / 2.0f);
+            bbox.setPosition(b->GetPosition().x * physics.SCALE, b->GetPosition().y * physics.SCALE);
+            bbox.setRotation(b->GetAngle() * 180.0f / 3.14159f);
+            bbox.setFillColor(sf::Color::Transparent);
+            bbox.setOutlineColor(sf::Color::White);
+            bbox.setOutlineThickness(1.0f);
+            gameBuffer.draw(bbox);
         }
 
         // --- DIBUJO DE CUCHILLOS ---
