@@ -1,5 +1,7 @@
 build/
+build-win/
 bin/
+levels/
 *.o
 *.exe
 *.out
