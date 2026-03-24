@@ -157,18 +157,38 @@ int main()
     }
 
     // --- ESTILO IMGUI TIPO MOTOR GRÁFICO ---
+// --- ESTILO IMGUI TIPO MOTOR GRÁFICO (REFINADO UE5/UNITY) ---
     ImGuiStyle& style = ImGui::GetStyle();
-    style.WindowRounding = 4.0f;
-    style.FrameRounding = 3.0f;
-    style.Colors[ImGuiCol_WindowBg] = ImVec4(0.12f, 0.12f, 0.12f, 0.95f);
-    style.Colors[ImGuiCol_TitleBg] = ImVec4(0.08f, 0.08f, 0.08f, 1.0f);
-    style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.15f, 0.15f, 0.15f, 1.0f);
-    style.Colors[ImGuiCol_Header] = ImVec4(0.2f, 0.2f, 0.2f, 1.0f);
-    style.Colors[ImGuiCol_HeaderHovered] = ImVec4(0.3f, 0.3f, 0.3f, 1.0f);
-    style.Colors[ImGuiCol_HeaderActive] = ImVec4(0.4f, 0.4f, 0.4f, 1.0f);
-    style.Colors[ImGuiCol_Button] = ImVec4(0.25f, 0.25f, 0.25f, 1.0f);
-    style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.35f, 0.35f, 0.35f, 1.0f);
-    style.Colors[ImGuiCol_ButtonActive] = ImVec4(0.45f, 0.45f, 0.45f, 1.0f);
+    style.WindowRounding = 6.0f;
+    style.FrameRounding = 4.0f;
+    style.GrabRounding = 4.0f;
+    style.PopupRounding = 4.0f;
+    style.ScrollbarRounding = 6.0f;
+    
+    // MAGIA UX: Márgenes dinámicos. Si es mobile, todo respira más para los dedos.
+    style.ItemSpacing = ImVec2(isMobile ? 12.0f : 8.0f, isMobile ? 10.0f : 6.0f);
+    style.FramePadding = ImVec2(isMobile ? 12.0f : 8.0f, isMobile ? 10.0f : 4.0f);
+    style.WindowPadding = ImVec2(12.0f, 12.0f);
+
+    // Paleta Dark Mode moderna (Gris azulado profundo)
+    style.Colors[ImGuiCol_WindowBg] = ImVec4(0.10f, 0.10f, 0.11f, 0.98f);
+    style.Colors[ImGuiCol_Border] = ImVec4(0.25f, 0.25f, 0.27f, 0.50f);
+    style.Colors[ImGuiCol_FrameBg] = ImVec4(0.15f, 0.15f, 0.17f, 1.0f);
+    style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.20f, 0.20f, 0.22f, 1.0f);
+    style.Colors[ImGuiCol_FrameBgActive] = ImVec4(0.25f, 0.25f, 0.27f, 1.0f);
+    style.Colors[ImGuiCol_TitleBg] = ImVec4(0.08f, 0.08f, 0.09f, 1.0f);
+    style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.12f, 0.12f, 0.14f, 1.0f);
+    style.Colors[ImGuiCol_Header] = ImVec4(0.22f, 0.22f, 0.24f, 1.0f);
+    style.Colors[ImGuiCol_HeaderHovered] = ImVec4(0.28f, 0.28f, 0.30f, 1.0f);
+    style.Colors[ImGuiCol_HeaderActive] = ImVec4(0.35f, 0.35f, 0.37f, 1.0f);
+    style.Colors[ImGuiCol_Button] = ImVec4(0.20f, 0.20f, 0.22f, 1.0f);
+    style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.30f, 0.30f, 0.33f, 1.0f);
+    style.Colors[ImGuiCol_ButtonActive] = ImVec4(0.40f, 0.40f, 0.44f, 1.0f);
+    
+    // Acentos visuales para feedback claro
+    style.Colors[ImGuiCol_CheckMark] = ImVec4(0.0f, 0.7f, 1.0f, 1.0f); 
+    style.Colors[ImGuiCol_SliderGrab] = ImVec4(0.0f, 0.7f, 1.0f, 1.0f);
+    style.Colors[ImGuiCol_SliderGrabActive] = ImVec4(0.0f, 0.8f, 1.0f, 1.0f);
 
     sf::RenderTexture gameBuffer;
     if (!gameBuffer.create(RENDER_WIDTH, RENDER_HEIGHT)) {
@@ -734,22 +754,23 @@ if (!physics.isPaused) {
 
         ImGui::SetNextWindowPos(ImVec2(isMobile ? 0 : leftPanelWidth, 0), ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2(isMobile ? screenWidth : availableWidth, toolbarHeight), ImGuiCond_Always);
-        ImGui::Begin("Toolbar", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoMove);
+ImGui::Begin("Toolbar", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoMove);
 
+        // START/STOP REC
         if (recorder && recorder->isRecording) {
             ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor::HSV(0.0f, 0.6f, 0.6f));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor::HSV(0.0f, 0.7f, 0.7f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, (ImVec4)ImColor::HSV(0.0f, 0.8f, 0.8f));
-            if (ImGui::Button("STOP REC", ImVec2(100, 40))) {
+            if (ImGui::Button("STOP REC", ImVec2(100, isMobile ? 45 : 35))) {
                 recorder->stop();
-                recorder.reset(); // Destruye el objeto y libera la VRAM
+                recorder.reset(); 
             }
             ImGui::PopStyleColor(3);
         } else {
             ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor::HSV(0.33f, 0.6f, 0.6f));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor::HSV(0.33f, 0.7f, 0.7f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, (ImVec4)ImColor::HSV(0.33f, 0.8f, 0.8f));
-            if (ImGui::Button("START REC", ImVec2(100, 40))) {
+            if (ImGui::Button("START REC", ImVec2(100, isMobile ? 45 : 35))) {
                 recorder = std::make_unique<Recorder>(RENDER_WIDTH, RENDER_HEIGHT, recordFPS, VIDEO_DIRECTORY);
                 soundManager.setRecorder(recorder.get());
                 recorder->isRecording = true;
@@ -757,41 +778,39 @@ if (!physics.isPaused) {
             ImGui::PopStyleColor(3);
         }
 
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(120);
-        if (ImGui::SliderInt("Sim FPS", &simFPS, 30, 240)) {
-            window.setFramerateLimit(simFPS);
-        }
+        if (!isMobile) ImGui::SameLine(); 
         
+        // CONTROLES DE FPS
+        ImGui::SetNextItemWidth(100);
+        if (ImGui::SliderInt("Sim FPS", &simFPS, 30, 240)) window.setFramerateLimit(simFPS);
         ImGui::SameLine();
-        ImGui::SetNextItemWidth(120);
+        ImGui::SetNextItemWidth(100);
         ImGui::SliderInt("Rec FPS", &recordFPS, 30, 240);
 
-        ImGui::SameLine();
-        ImGui::SetCursorPosY(15);
+        if (!isMobile) ImGui::SameLine();
+
+        // CONTROLES DE FÍSICA
         if (physics.isPaused) {
-            if (ImGui::Button("RESUME PHYS", ImVec2(100, 30))) physics.isPaused = false;
+            if (ImGui::Button("RESUME", ImVec2(90, isMobile ? 45 : 35))) physics.isPaused = false;
         } else {
-            if (ImGui::Button("PAUSE PHYS", ImVec2(100, 30))) physics.isPaused = true;
+            if (ImGui::Button("PAUSE", ImVec2(90, isMobile ? 45 : 35))) physics.isPaused = true;
         }
 
         ImGui::SameLine();
-        ImGui::SetCursorPosY(15);
-        if (ImGui::Button("RESET RACE", ImVec2(100, 30))) {
+        if (ImGui::Button("RESET RACE", ImVec2(100, isMobile ? 45 : 35))) {
             physics.resetRacers();
             for(auto& t : trails) t.points.clear();
             victoryTimer = 0.0f; 
             victorySequenceStarted = false; 
         }
 
-        ImGui::SameLine();
-        ImGui::SetCursorPosY(15);
+        if (!isMobile) ImGui::SameLine();
+
+        // CANCIÓN
         ImGui::SetNextItemWidth(120);
         ImGui::InputText("##SongFile", songFile, 128);
         ImGui::SameLine();
-        if (ImGui::Button("LOAD SONG", ImVec2(90, 30))) {
-            physics.loadSong(songFile);
-        }
+        if (ImGui::Button("LOAD SONG", ImVec2(90, isMobile ? 45 : 35))) physics.loadSong(songFile);
 
         ImGui::End();
 
@@ -984,13 +1003,7 @@ if (!physics.isPaused) {
                 ImGui::Separator();
                 ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, 1.0f), "RENDER LAYER & STYLE");
                 
-                // Botones rápidos para subir/bajar capas
-                if (ImGui::Button("-##Layer")) w.zIndex--;
-                ImGui::SameLine();
-                ImGui::SetNextItemWidth(40);
-                ImGui::InputInt("Layer", &w.zIndex, 0, 0); // Desactivamos los steps nativos para usar los nuestros
-                ImGui::SameLine();
-                if (ImGui::Button("+##Layer")) w.zIndex++;
+                ImGui::InputInt("Z-Index Layer", &w.zIndex, 1, 5);
 
                 // El checkbox para matar el borde a esta pared específica
                 ImGui::Checkbox("Draw Outline (Border)", &w.hasOutline);
@@ -1025,39 +1038,43 @@ if (!physics.isPaused) {
                 if (changed) physics.updateCustomWall(selectedIndex, pos[0], pos[1], size[0], size[1], snd, w.shapeType, w.rotation);
 
                 ImGui::Separator();
-                ImGui::Text("Geometry");
-                int sType = w.shapeType;
-                float rotDeg = w.rotation * 180.0f / 3.14159f; 
-                bool geoChanged = false;
+// --- GEOMETRÍA ---
+                if (ImGui::CollapsingHeader("Geometry", ImGuiTreeNodeFlags_DefaultOpen)) {
+                    int sType = w.shapeType;
+                    float rotDeg = w.rotation * 180.0f / 3.14159f; 
+                    bool geoChanged = false;
 
-                if (ImGui::RadioButton("Box", sType == 0)) { sType = 0; geoChanged = true; } ImGui::SameLine();
-                if (ImGui::RadioButton("Spike", sType == 1)) { sType = 1; geoChanged = true; w.isDeadly = true; }
+                    if (ImGui::RadioButton("Box", sType == 0)) { sType = 0; geoChanged = true; } ImGui::SameLine();
+                    if (ImGui::RadioButton("Spike", sType == 1)) { sType = 1; geoChanged = true; w.isDeadly = true; }
 
-                if (ImGui::SliderFloat("Rotation", &rotDeg, 0.0f, 360.0f, "%.0f deg")) geoChanged = true;
-                
-                if (ImGui::Button("0°")) { rotDeg = 0.0f; geoChanged = true; } ImGui::SameLine();
-                if (ImGui::Button("90°")) { rotDeg = 90.0f; geoChanged = true; } ImGui::SameLine();
-                if (ImGui::Button("180°")) { rotDeg = 180.0f; geoChanged = true; } ImGui::SameLine();
-                if (ImGui::Button("270°")) { rotDeg = 270.0f; geoChanged = true; }
+                    if (ImGui::SliderFloat("Rotation", &rotDeg, 0.0f, 360.0f, "%.0f deg")) geoChanged = true;
+                    
+                    // Botones de rotación rápida alineados prolijamente
+                    if (ImGui::Button("0°", ImVec2(40,0))) { rotDeg = 0.0f; geoChanged = true; } ImGui::SameLine();
+                    if (ImGui::Button("90°", ImVec2(40,0))) { rotDeg = 90.0f; geoChanged = true; } ImGui::SameLine();
+                    if (ImGui::Button("180°", ImVec2(45,0))) { rotDeg = 180.0f; geoChanged = true; } ImGui::SameLine();
+                    if (ImGui::Button("270°", ImVec2(45,0))) { rotDeg = 270.0f; geoChanged = true; }
 
-                if (geoChanged || changed) { 
-                    float rotRad = rotDeg * 3.14159f / 180.0f;
-                    physics.updateCustomWall(selectedIndex, pos[0], pos[1], size[0], size[1], snd, sType, rotRad);
+                    if (geoChanged || changed) { 
+                        float rotRad = rotDeg * 3.14159f / 180.0f;
+                        physics.updateCustomWall(selectedIndex, pos[0], pos[1], size[0], size[1], snd, sType, rotRad);
+                    }
                 }
 
-                ImGui::Separator();
-                ImGui::Text("Appearance");
-                sf::Color c = w.neonColor;
-                ImVec4 imColor = ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, 1.0f);
+                // --- APARIENCIA ---
+                if (ImGui::CollapsingHeader("Appearance", ImGuiTreeNodeFlags_DefaultOpen)) {
+                    sf::Color c = w.neonColor;
+                    ImVec4 imColor = ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, 1.0f);
 
-                ImGui::ColorButton("##preview", imColor, ImGuiColorEditFlags_NoTooltip, ImVec2(20, 20));
-                ImGui::SameLine();
+                    ImGui::ColorButton("##preview", imColor, ImGuiColorEditFlags_NoTooltip, ImVec2(24, 24));
+                    ImGui::SameLine();
 
-                int currentColorIdx = w.colorIndex;
-                const char* colorNames[] = { "Cyan", "Magenta", "Lime", "Orange", "Purple", "Red", "Gold", "Blue", "Pink" };
-                ImGui::SetNextItemWidth(-1);
-                if (ImGui::Combo("##Color", &currentColorIdx, colorNames, IM_ARRAYSIZE(colorNames))) {
-                    physics.updateWallColor(selectedIndex, currentColorIdx);
+                    int currentColorIdx = w.colorIndex;
+                    const char* colorNames[] = { "Cyan", "Magenta", "Lime", "Orange", "Purple", "Red", "Gold", "Blue", "Pink" };
+                    ImGui::SetNextItemWidth(-1);
+                    if (ImGui::Combo("##Color", &currentColorIdx, colorNames, IM_ARRAYSIZE(colorNames))) {
+                        physics.updateWallColor(selectedIndex, currentColorIdx);
+                    }
                 }
 
                 ImGui::Separator();
