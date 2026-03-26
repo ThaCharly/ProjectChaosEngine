@@ -336,6 +336,11 @@ int main()
     GizmoState currentGizmo = GizmoState::None;
     b2Vec2 dragOffset(0.0f, 0.0f);
     
+    // QoL: Snapping y Toggles de Gizmos
+    int snapStepPixels = 0; // 0 = libre, 10, 25, 50, 100...
+    bool showRotateGizmo = true;
+    bool showScaleGizmo = true;
+    
     // Guardamos el estado inicial exacto para usar "Deltas" (cero saltos)
     float initialMouseAngle = 0.0f;
     float initialRotation = 0.0f;
@@ -455,9 +460,9 @@ ImGuiIO& io = ImGui::GetIO();
                         w.body->GetWorldPoint(b2Vec2(-w.width/2.0f,  w.height/2.0f))  // BL
                     };
 
-                    if ((mouseB2 - rotHandleGlobal).Length() < gizmoTolerance) {
+                    if (showRotateGizmo && (mouseB2 - rotHandleGlobal).Length() < gizmoTolerance) {
                         isHoveringRotate = true;
-                    } else {
+                    } else if (showScaleGizmo) {
                         float minDist = gizmoTolerance; 
                         for (int c = 0; c < 4; c++) {
                             float dist = (mouseB2 - corners[c]).Length();
@@ -479,12 +484,14 @@ ImGuiIO& io = ImGui::GetIO();
                         wzPos + b2Vec2(-wzW/2.0f,  wzH/2.0f)
                     };
 
-                    float minDist = gizmoTolerance;
-                    for (int c = 0; c < 4; c++) {
-                        float dist = (mouseB2 - corners[c]).Length();
-                        if (dist < minDist) { 
-                            hoveredScaleCorner = c; 
-                            minDist = dist; 
+                    if (showScaleGizmo) {
+                        float minDist = gizmoTolerance;
+                        for (int c = 0; c < 4; c++) {
+                            float dist = (mouseB2 - corners[c]).Length();
+                            if (dist < minDist) { 
+                                hoveredScaleCorner = c; 
+                                minDist = dist; 
+                            }
                         }
                     }
                 }
@@ -602,21 +609,46 @@ ImGuiIO& io = ImGui::GetIO();
                 } 
             } else if (ptr.state == PointerState::Held) {
                 // --- FASE DE ARRASTRE ---
+                
+                // --- LÓGICA DE SNAPPING (QoL) DIRECTO EN BOX2D ---
+                auto applySnap = [&](float valueB2) -> float {
+                    bool shift = sf::Keyboard::isKeyPressed(sf::Keyboard::Key::LShift) || sf::Keyboard::isKeyPressed(sf::Keyboard::Key::RShift);
+                    bool ctrl = sf::Keyboard::isKeyPressed(sf::Keyboard::Key::LControl) || sf::Keyboard::isKeyPressed(sf::Keyboard::Key::RControl);
+                    bool alt = sf::Keyboard::isKeyPressed(sf::Keyboard::Key::LAlt) || sf::Keyboard::isKeyPressed(sf::Keyboard::Key::RAlt);
+                    bool z = sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Z);
+
+                    if (ctrl) {
+                        return std::round(valueB2); // Clavado a 1.0 exacto en Box2D
+                    } else if (shift) {
+                        return std::round(valueB2 * 2.0f) / 2.0f; // Clavado a 0.5 exacto en Box2D
+                    } else if (alt) {
+                        return std::round(valueB2 * 4.0f) / 4.0f; // Clavado a 0.25 exacto en Box2D
+                    } else if (z) {
+                        return std::round(valueB2 * 10.0f) / 10.0f; // Clavado a 0.1 exacto en Box2D
+                    }
+                    
+                    
+                    return valueB2; // Movimiento continuo, 100% libre y preciso
+                };
+
                 if (currentGizmo == GizmoState::Moving) {
+                    float targetXB2 = applySnap(box2dX - dragOffset.x);
+                    float targetYB2 = applySnap(box2dY - dragOffset.y);
+
                     if (selectedType == EntityType::Wall && selectedIndex >= 0) {
                         CustomWall& w = physics.getCustomWalls()[selectedIndex];
-                        w.body->SetTransform(b2Vec2(box2dX - dragOffset.x, box2dY - dragOffset.y), w.rotation);
+                        w.body->SetTransform(b2Vec2(targetXB2, targetYB2), w.rotation);
                         w.body->SetAwake(true);
                     } 
                     else if (selectedType == EntityType::Racers && selectedIndex >= 0) {
                         b2Body* b = bodies[selectedIndex];
-                        b->SetTransform(b2Vec2(box2dX - dragOffset.x, box2dY - dragOffset.y), b->GetAngle());
+                        b->SetTransform(b2Vec2(targetXB2, targetYB2), b->GetAngle());
                         b->SetLinearVelocity(b2Vec2(0.0f, 0.0f)); 
                         b->SetAwake(true);
                     }
                     else if (selectedType == EntityType::WinZone) {
-                        physics.winZonePos[0] = box2dX - dragOffset.x;
-                        physics.winZonePos[1] = box2dY - dragOffset.y;
+                        physics.winZonePos[0] = targetXB2;
+                        physics.winZonePos[1] = targetYB2;
                         physics.updateWinZone(physics.winZonePos[0], physics.winZonePos[1], physics.winZoneSize[0], physics.winZoneSize[1]);
                     }
                 } 
@@ -624,6 +656,21 @@ ImGuiIO& io = ImGui::GetIO();
                     CustomWall& w = physics.getCustomWalls()[selectedIndex];
                     float currentMouseAngle = std::atan2(mouseB2.y - w.body->GetPosition().y, mouseB2.x - w.body->GetPosition().x);
                     float newAngle = initialRotation + (currentMouseAngle - initialMouseAngle);
+                    
+                    // Snap de rotación
+                    bool shift = sf::Keyboard::isKeyPressed(sf::Keyboard::Key::LShift) || sf::Keyboard::isKeyPressed(sf::Keyboard::Key::RShift);
+                    bool ctrl = sf::Keyboard::isKeyPressed(sf::Keyboard::Key::LControl) || sf::Keyboard::isKeyPressed(sf::Keyboard::Key::RControl);
+                    
+                    if (ctrl) {
+                        float deg = newAngle * 180.0f / 3.14159f;
+                        deg = std::round(deg / 45.0f) * 45.0f; // Control clava a 45 grados
+                        newAngle = deg * 3.14159f / 180.0f;
+                    } else if (shift) {
+                        float deg = newAngle * 180.0f / 3.14159f;
+                        deg = std::round(deg / 15.0f) * 15.0f; // Shift clava a 15 grados
+                        newAngle = deg * 3.14159f / 180.0f;
+                    }
+
                     w.rotation = newAngle;
                     w.body->SetTransform(w.body->GetPosition(), newAngle);
                     w.body->SetAwake(true);
@@ -639,8 +686,8 @@ ImGuiIO& io = ImGui::GetIO();
                         deltaX = currentMouseLocal.x - initialMouseLocal.x;
                         deltaY = currentMouseLocal.y - initialMouseLocal.y;
 
-                        float newW = std::max(0.5f, initialWidth + (deltaX * sx));
-                        float newH = std::max(0.5f, initialHeight + (deltaY * sy));
+                        float newW = std::max(0.5f, applySnap(initialWidth + (deltaX * sx)));
+                        float newH = std::max(0.5f, applySnap(initialHeight + (deltaY * sy)));
 
                         b2Vec2 fixedLocal(-sx * initialWidth / 2.0f, -sy * initialHeight / 2.0f);
                         b2Vec2 newCenterLocal((fixedLocal.x + (fixedLocal.x + sx * newW)) / 2.0f, (fixedLocal.y + (fixedLocal.y + sy * newH)) / 2.0f);
@@ -654,8 +701,8 @@ ImGuiIO& io = ImGui::GetIO();
                         deltaX = currentMouseLocal.x - initialMouseLocal.x;
                         deltaY = currentMouseLocal.y - initialMouseLocal.y;
 
-                        float newW = std::max(0.5f, initialWidth + (deltaX * sx));
-                        float newH = std::max(0.5f, initialHeight + (deltaY * sy));
+                        float newW = std::max(0.5f, applySnap(initialWidth + (deltaX * sx)));
+                        float newH = std::max(0.5f, applySnap(initialHeight + (deltaY * sy)));
 
                         b2Vec2 fixedLocal(-sx * initialWidth / 2.0f, -sy * initialHeight / 2.0f);
                         b2Vec2 newCenterLocal((fixedLocal.x + (fixedLocal.x + sx * newW)) / 2.0f, (fixedLocal.y + (fixedLocal.y + sy * newH)) / 2.0f);
@@ -824,6 +871,26 @@ ImGui::Begin("Toolbar", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_
             victoryTimer = 0.0f; 
             victorySequenceStarted = false; 
         }
+
+        if (!isMobile) ImGui::SameLine();
+
+        // --- GIZMOS & QoL ---
+        ImGui::SetNextItemWidth(90);
+        const char* snapItems[] = { "Snap: Off", "Snap: 10", "Snap: 25", "Snap: 50", "Snap: 100" };
+        static int snapItemIndex = 0;
+        if (ImGui::Combo("##Snap", &snapItemIndex, snapItems, IM_ARRAYSIZE(snapItems))) {
+            if (snapItemIndex == 0) snapStepPixels = 0;
+            else if (snapItemIndex == 1) snapStepPixels = 10;
+            else if (snapItemIndex == 2) snapStepPixels = 25;
+            else if (snapItemIndex == 3) snapStepPixels = 50;
+            else if (snapItemIndex == 4) snapStepPixels = 100;
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Mantené SHIFT al arrastrar para invertir el modo Snap.");
+
+        ImGui::SameLine();
+        ImGui::Checkbox("Rot Gizmo", &showRotateGizmo);
+        ImGui::SameLine();
+        ImGui::Checkbox("Scl Gizmo", &showScaleGizmo);
 
         if (!isMobile) ImGui::SameLine();
 
@@ -1718,23 +1785,25 @@ ImGui::Begin("Toolbar", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_
             t.translate({pos.x * physics.SCALE, pos.y * physics.SCALE});
             t.rotate(sf::radians(rot));
 
-            bool rotActive = (currentGizmo == GizmoState::Rotating) || (currentGizmo == GizmoState::None && isHoveringRotate);
-            sf::Vector2f topEdgePx = t.transformPoint({0.0f, -hPx / 2.0f});
-            sf::Vector2f rotHandlePx = t.transformPoint({0.0f, -hPx / 2.0f - 1.5f * physics.SCALE});
-            
-            sf::VertexArray lineToRot(sf::PrimitiveType::Lines, 2);
-            lineToRot[0].position = topEdgePx; lineToRot[1].position = rotHandlePx;
-            lineToRot[0].color = sf::Color(255, 150, 0); lineToRot[1].color = sf::Color(255, 150, 0);
-            gameBuffer.draw(lineToRot);
+            if (showRotateGizmo) {
+                bool rotActive = (currentGizmo == GizmoState::Rotating) || (currentGizmo == GizmoState::None && isHoveringRotate);
+                sf::Vector2f topEdgePx = t.transformPoint({0.0f, -hPx / 2.0f});
+                sf::Vector2f rotHandlePx = t.transformPoint({0.0f, -hPx / 2.0f - 1.5f * physics.SCALE});
+                
+                sf::VertexArray lineToRot(sf::PrimitiveType::Lines, 2);
+                lineToRot[0].position = topEdgePx; lineToRot[1].position = rotHandlePx;
+                lineToRot[0].color = sf::Color(255, 150, 0); lineToRot[1].color = sf::Color(255, 150, 0);
+                gameBuffer.draw(lineToRot);
 
-            float rotRadius = (rotActive ? 0.4f : 0.3f) * physics.SCALE;
-            sf::CircleShape rotCircle(rotRadius);
-            rotCircle.setOrigin({rotRadius, rotRadius});
-            rotCircle.setPosition(rotHandlePx);
-            rotCircle.setFillColor(rotActive ? sf::Color(255, 150, 0, 180) : sf::Color(255, 150, 0, 100));
-            rotCircle.setOutlineColor(sf::Color(255, 150, 0));
-            rotCircle.setOutlineThickness(1.5f);
-            gameBuffer.draw(rotCircle);
+                float rotRadius = (rotActive ? 0.4f : 0.3f) * physics.SCALE;
+                sf::CircleShape rotCircle(rotRadius);
+                rotCircle.setOrigin({rotRadius, rotRadius});
+                rotCircle.setPosition(rotHandlePx);
+                rotCircle.setFillColor(rotActive ? sf::Color(255, 150, 0, 180) : sf::Color(255, 150, 0, 100));
+                rotCircle.setOutlineColor(sf::Color(255, 150, 0));
+                rotCircle.setOutlineThickness(1.5f);
+                gameBuffer.draw(rotCircle);
+            }
 
             sf::Vector2f cornersPx[4] = {
                 t.transformPoint({-wPx / 2.0f, -hPx / 2.0f}),
@@ -1743,17 +1812,19 @@ ImGui::Begin("Toolbar", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_
                 t.transformPoint({-wPx / 2.0f,  hPx / 2.0f})
             };
 
-            for (int i = 0; i < 4; i++) {
-                bool isHovered = (currentGizmo == GizmoState::Scaling && activeScaleCorner == i) || (currentGizmo == GizmoState::None && hoveredScaleCorner == i);
-                float scaleSize = (isHovered ? 0.4f : 0.25f) * physics.SCALE;
-                sf::RectangleShape scaleRect({scaleSize, scaleSize});
-                scaleRect.setOrigin({scaleSize / 2.0f, scaleSize / 2.0f});
-                scaleRect.setPosition(cornersPx[i]);
-                scaleRect.setRotation(sf::radians(rot));
-                scaleRect.setFillColor(isHovered ? sf::Color(0, 255, 100, 200) : sf::Color(0, 255, 100, 100));
-                scaleRect.setOutlineColor(sf::Color(0, 255, 100));
-                scaleRect.setOutlineThickness(1.5f);
-                gameBuffer.draw(scaleRect);
+            if (showScaleGizmo) {
+                for (int i = 0; i < 4; i++) {
+                    bool isHovered = (currentGizmo == GizmoState::Scaling && activeScaleCorner == i) || (currentGizmo == GizmoState::None && hoveredScaleCorner == i);
+                    float scaleSize = (isHovered ? 0.4f : 0.25f) * physics.SCALE;
+                    sf::RectangleShape scaleRect({scaleSize, scaleSize});
+                    scaleRect.setOrigin({scaleSize / 2.0f, scaleSize / 2.0f});
+                    scaleRect.setPosition(cornersPx[i]);
+                    scaleRect.setRotation(sf::radians(rot));
+                    scaleRect.setFillColor(isHovered ? sf::Color(0, 255, 100, 200) : sf::Color(0, 255, 100, 100));
+                    scaleRect.setOutlineColor(sf::Color(0, 255, 100));
+                    scaleRect.setOutlineThickness(1.5f);
+                    gameBuffer.draw(scaleRect);
+                }
             }
         } 
         else if (selectedType == EntityType::WinZone) {
@@ -1777,16 +1848,18 @@ ImGui::Begin("Toolbar", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_
                 sf::Vector2f{xPx - wPx / 2.0f, yPx + hPx / 2.0f}
             };
 
-            for (int i = 0; i < 4; i++) {
-                bool isHovered = (currentGizmo == GizmoState::Scaling && activeScaleCorner == i) || (currentGizmo == GizmoState::None && hoveredScaleCorner == i);
-                float scaleSize = (isHovered ? 0.4f : 0.25f) * physics.SCALE;
-                sf::RectangleShape scaleRect({scaleSize, scaleSize});
-                scaleRect.setOrigin({scaleSize / 2.0f, scaleSize / 2.0f});
-                scaleRect.setPosition(cornersPx[i]);
-                scaleRect.setFillColor(isHovered ? sf::Color(0, 255, 100, 200) : sf::Color(0, 255, 100, 100));
-                scaleRect.setOutlineColor(sf::Color(0, 255, 100));
-                scaleRect.setOutlineThickness(1.5f);
-                gameBuffer.draw(scaleRect);
+            if (showScaleGizmo) {
+                for (int i = 0; i < 4; i++) {
+                    bool isHovered = (currentGizmo == GizmoState::Scaling && activeScaleCorner == i) || (currentGizmo == GizmoState::None && hoveredScaleCorner == i);
+                    float scaleSize = (isHovered ? 0.4f : 0.25f) * physics.SCALE;
+                    sf::RectangleShape scaleRect({scaleSize, scaleSize});
+                    scaleRect.setOrigin({scaleSize / 2.0f, scaleSize / 2.0f});
+                    scaleRect.setPosition(cornersPx[i]);
+                    scaleRect.setFillColor(isHovered ? sf::Color(0, 255, 100, 200) : sf::Color(0, 255, 100, 100));
+                    scaleRect.setOutlineColor(sf::Color(0, 255, 100));
+                    scaleRect.setOutlineThickness(1.5f);
+                    gameBuffer.draw(scaleRect);
+                }
             }
         }
         else if (selectedType == EntityType::Racers && selectedIndex >= 0 && selectedIndex < bodies.size()) {
