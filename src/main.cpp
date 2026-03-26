@@ -338,8 +338,8 @@ int main()
     
     // QoL: Snapping y Toggles de Gizmos
     int snapStepPixels = 0; // 0 = libre, 10, 25, 50, 100...
-    bool showRotateGizmo = true;
-    bool showScaleGizmo = true;
+    enum class EditorTool { Translate, Rotate, Scale };
+    EditorTool currentTool = EditorTool::Translate;
     
     // Guardamos el estado inicial exacto para usar "Deltas" (cero saltos)
     float initialMouseAngle = 0.0f;
@@ -383,6 +383,13 @@ int main()
         // SISTEMA DE PICKING Y GIZMOS (MOVE, ROTATE, SCALE x4)
         // ==========================================
 ImGuiIO& io = ImGui::GetIO();
+
+        // Atajos de teclado para Herramientas (W, E, R) - Ignorar si escribimos en ImGui
+        if (!io.WantCaptureKeyboard) {
+            if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::W)) currentTool = EditorTool::Translate;
+            if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::E)) currentTool = EditorTool::Rotate;
+            if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::R)) currentTool = EditorTool::Scale;
+        }
         
         // 1. Leemos la verdad absoluta desde SFML, no desde ImGui
         sf::Vector2u winSize = window.getSize();
@@ -460,9 +467,9 @@ ImGuiIO& io = ImGui::GetIO();
                         w.body->GetWorldPoint(b2Vec2(-w.width/2.0f,  w.height/2.0f))  // BL
                     };
 
-                    if (showRotateGizmo && (mouseB2 - rotHandleGlobal).Length() < gizmoTolerance) {
-                        isHoveringRotate = true;
-                    } else if (showScaleGizmo) {
+                    if (currentTool == EditorTool::Rotate && (mouseB2 - rotHandleGlobal).Length() < gizmoTolerance) {
+                         isHoveringRotate = true;
+                    } else if (currentTool == EditorTool::Scale) {
                         float minDist = gizmoTolerance; 
                         for (int c = 0; c < 4; c++) {
                             float dist = (mouseB2 - corners[c]).Length();
@@ -484,8 +491,8 @@ ImGuiIO& io = ImGui::GetIO();
                         wzPos + b2Vec2(-wzW/2.0f,  wzH/2.0f)
                     };
 
-                    if (showScaleGizmo) {
-                        float minDist = gizmoTolerance;
+                    if (currentTool == EditorTool::Scale) {
+                         float minDist = gizmoTolerance;
                         for (int c = 0; c < 4; c++) {
                             float dist = (mouseB2 - corners[c]).Length();
                             if (dist < minDist) { 
@@ -497,7 +504,7 @@ ImGuiIO& io = ImGui::GetIO();
                 }
 
                 // Fallback para cursor de Mover (Usamos PADDING para que no titile)
-                if (!isHoveringRotate && hoveredScaleCorner == -1) {
+                if (currentTool == EditorTool::Translate && !isHoveringRotate && hoveredScaleCorner == -1) {
                     // Priorizamos chequear el objeto que YA está seleccionado para que no lo suelte fácil
                     if (selectedType == EntityType::Racers && selectedIndex >= 0 && selectedIndex < bodies.size()) {
                         if ((mouseB2 - bodies[selectedIndex]->GetPosition()).Length() < (physics.currentRacerSize / 2.0f) + movePadding) isHoveringMove = true;
@@ -574,8 +581,10 @@ ImGuiIO& io = ImGui::GetIO();
                         if (clickedRacer != -1) {
                             selectedType = EntityType::Racers;
                             selectedIndex = clickedRacer; 
-                            currentGizmo = GizmoState::Moving;
-                            dragOffset = mouseB2 - bodies[clickedRacer]->GetPosition();
+                            if (currentTool == EditorTool::Translate) {
+                                currentGizmo = GizmoState::Moving;
+                                dragOffset = mouseB2 - bodies[clickedRacer]->GetPosition();
+                            }
                         } else {
                             int clickedWall = -1;
                             // Prioridad a la pared seleccionada por si la estás agarrando del borde
@@ -592,14 +601,18 @@ ImGuiIO& io = ImGui::GetIO();
                             if (clickedWall != -1) {
                                 selectedType = EntityType::Wall;
                                 selectedIndex = clickedWall;
-                                currentGizmo = GizmoState::Moving;
-                                b2Vec2 objPos = physics.getCustomWalls()[clickedWall].body->GetPosition();
-                                dragOffset = b2Vec2(box2dX - objPos.x, box2dY - objPos.y);
+                                if (currentTool == EditorTool::Translate) {
+                                    currentGizmo = GizmoState::Moving;
+                                    b2Vec2 objPos = physics.getCustomWalls()[clickedWall].body->GetPosition();
+                                    dragOffset = b2Vec2(box2dX - objPos.x, box2dY - objPos.y);
+                                }
                             } else if (std::abs(mouseB2.x - physics.winZonePos[0]) <= physics.winZoneSize[0]/2.0f + movePadding && 
                                        std::abs(mouseB2.y - physics.winZonePos[1]) <= physics.winZoneSize[1]/2.0f + movePadding) {
                                 selectedType = EntityType::WinZone;
-                                currentGizmo = GizmoState::Moving;
-                                dragOffset = mouseB2 - b2Vec2(physics.winZonePos[0], physics.winZonePos[1]);
+                                if (currentTool == EditorTool::Translate) {
+                                    currentGizmo = GizmoState::Moving;
+                                    dragOffset = mouseB2 - b2Vec2(physics.winZonePos[0], physics.winZonePos[1]);
+                                }
                             } else {
                                 selectedType = EntityType::None;
                                 selectedIndex = -1;
@@ -891,9 +904,14 @@ ImGui::Begin("Toolbar", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Mantené SHIFT al arrastrar para invertir el modo Snap.");
 
         ImGui::SameLine();
-        ImGui::Checkbox("Rot Gizmo", &showRotateGizmo);
+        int toolIdx = (int)currentTool;
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, style.ItemSpacing.y));
+        if (ImGui::RadioButton("Move (W)", toolIdx == 0)) currentTool = EditorTool::Translate;
         ImGui::SameLine();
-        ImGui::Checkbox("Scl Gizmo", &showScaleGizmo);
+        if (ImGui::RadioButton("Rot (E)", toolIdx == 1)) currentTool = EditorTool::Rotate;
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Scale (R)", toolIdx == 2)) currentTool = EditorTool::Scale;
+        ImGui::PopStyleVar();
 
         if (!isMobile) ImGui::SameLine();
 
@@ -1788,7 +1806,7 @@ ImGui::Begin("Toolbar", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_
             t.translate({pos.x * physics.SCALE, pos.y * physics.SCALE});
             t.rotate(sf::radians(rot));
 
-            if (showRotateGizmo) {
+            if (currentTool == EditorTool::Rotate) {
                 bool rotActive = (currentGizmo == GizmoState::Rotating) || (currentGizmo == GizmoState::None && isHoveringRotate);
                 sf::Vector2f topEdgePx = t.transformPoint({0.0f, -hPx / 2.0f});
                 sf::Vector2f rotHandlePx = t.transformPoint({0.0f, -hPx / 2.0f - 1.5f * physics.SCALE});
@@ -1815,7 +1833,7 @@ ImGui::Begin("Toolbar", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_
                 t.transformPoint({-wPx / 2.0f,  hPx / 2.0f})
             };
 
-            if (showScaleGizmo) {
+            if (currentTool == EditorTool::Scale) {
                 for (int i = 0; i < 4; i++) {
                     bool isHovered = (currentGizmo == GizmoState::Scaling && activeScaleCorner == i) || (currentGizmo == GizmoState::None && hoveredScaleCorner == i);
                     float scaleSize = (isHovered ? 0.4f : 0.25f) * physics.SCALE;
@@ -1851,7 +1869,7 @@ ImGui::Begin("Toolbar", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_
                 sf::Vector2f{xPx - wPx / 2.0f, yPx + hPx / 2.0f}
             };
 
-            if (showScaleGizmo) {
+            if (currentTool == EditorTool::Scale) {
                 for (int i = 0; i < 4; i++) {
                     bool isHovered = (currentGizmo == GizmoState::Scaling && activeScaleCorner == i) || (currentGizmo == GizmoState::None && hoveredScaleCorner == i);
                     float scaleSize = (isHovered ? 0.4f : 0.25f) * physics.SCALE;
