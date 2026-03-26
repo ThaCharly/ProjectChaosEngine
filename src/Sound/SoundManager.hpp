@@ -6,6 +6,7 @@
 #include <cmath>
 #include <iostream>
 #include <random>
+#include <cstdint> // ¡Clave para std::int16_t!
 
 // Forward declaration
 class Recorder;
@@ -23,8 +24,16 @@ public:
             generateTone(i, freq);
         }
 
-        // Pool de voces (aumenté un poco por si se pica la canción rápida)
-        for(int i=0; i<64; ++i) soundPool.emplace_back();
+        // Pool de voces: SFML 3 exige que le pasemos un buffer al nacer.
+        // Como el mapa 'midiBuffers' ya tiene todos los buffers creados (porque 
+        // generateTone se ejecutó antes), agarramos el buffer de la nota 0 
+        // solo como un 'dummy' para satisfacer al constructor. 
+        // Después en playMidiNote() se pisa con el buffer correcto usando setBuffer().
+        const sf::SoundBuffer& dummyBuffer = midiBuffers[0];
+        
+        for(int i = 0; i < 64; ++i) {
+            soundPool.emplace_back(dummyBuffer);
+        }
     }
 
     void setRecorder(Recorder* rec) {
@@ -36,7 +45,7 @@ public:
         const unsigned SAMPLE_RATE = 44100;
         const int AMPLITUDE = 18000; 
 
-        std::vector<sf::Int16> rawSamples;
+        std::vector<std::int16_t> rawSamples; // Adiós sf::Int16
         float duration = 0.3f; // Un poquito más cortas para melodías rápidas
         int numSamples = (int)(SAMPLE_RATE * duration);
         float attackTime = 0.01f; // Ataque rápido
@@ -60,11 +69,13 @@ public:
                 envelope *= fade;
             }
 
-            rawSamples.push_back((sf::Int16)(wave * envelope * AMPLITUDE));
+            rawSamples.push_back((std::int16_t)(wave * envelope * AMPLITUDE)); // Adiós sf::Int16
         }
 
         sf::SoundBuffer buffer;
-        if (buffer.loadFromSamples(&rawSamples[0], rawSamples.size(), 1, SAMPLE_RATE)) {
+        // SFML 3: Puntero, cantidad, canales (1), sample rate, y el Channel Map al final.
+        // Además, es buena práctica en C++11 en adelante usar .data() en vez de &vector[0]
+        if (buffer.loadFromSamples(rawSamples.data(), rawSamples.size(), 1, SAMPLE_RATE, {sf::SoundChannel::Mono})) {
             midiBuffers[id] = buffer;
         }
     }
@@ -79,7 +90,7 @@ public:
             sound->setBuffer(midiBuffers[noteNumber]);
             sound->setVolume(volume); 
             sound->setPitch(1.0f);
-            sound->setPosition(0, 0, 0); // Sonido 2D plano para la música
+            sound->setPosition({0.0f, 0.0f, 0.0f}); // SFML 3: Pide Vector3 explícito
             sound->setAttenuation(0);    // Que se escuche igual en todos lados
             sound->play();
         }
@@ -101,12 +112,13 @@ public:
 private:
     sf::Sound* getFreeSound() {
         for (auto& s : soundPool) {
-            if (s.getStatus() == sf::Sound::Stopped) return &s;
+            // SFML 3: Status es un enum class fuertemente tipado
+            if (s.getStatus() == sf::Sound::Status::Stopped) return &s; 
         }
         return &soundPool[0]; 
     }
 
-    void sendToRecorder(const sf::Int16* samples, std::size_t count, float vol);
+    void sendToRecorder(const std::int16_t* samples, std::size_t count, float vol);
 
     // Cambiamos el nombre para ser claros
     std::map<int, sf::SoundBuffer> midiBuffers;

@@ -101,7 +101,7 @@ void Recorder::addFrame(const sf::Texture& texture) {
     size_t dataSize = width * height * 4;
 
     // 1. Forzamos a SFML a vincular su textura en la máquina de estados de OpenGL
-    sf::Texture::bind(&texture);
+    glBindTexture(GL_TEXTURE_2D, texture.getNativeHandle());
 
     // 2. TRANSFERENCIA ASÍNCRONA (VRAM -> PBO)
     // Le ordenamos al controlador DMA de la GPU que empiece a copiar la textura.
@@ -118,7 +118,7 @@ void Recorder::addFrame(const sf::Texture& texture) {
 
         if (ptr) {
             // Acá sí hacemos la copia a RAM, pero la info ya viajó por el PCIe
-            std::vector<sf::Uint8> buffer(ptr, ptr + dataSize);
+            std::vector<std::uint8_t> buffer(ptr, ptr + dataSize);
             my_glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
 
             // Lo mandamos al hilo esclavo de FFmpeg con BACKPRESSURE
@@ -137,7 +137,7 @@ void Recorder::addFrame(const sf::Texture& texture) {
 
     // 4. LIMPIEZA
     my_glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-    sf::Texture::bind(nullptr);
+    glBindTexture(GL_TEXTURE_2D, 0);
 
     // 5. CAMBIO DE ROLES (Ping-Pong)
     pboIndex = (pboIndex + 1) % 2;
@@ -148,7 +148,7 @@ void Recorder::addFrame(const sf::Texture& texture) {
 
 void Recorder::workerLoop() {
     while (true) {
-        std::vector<sf::Uint8> currentFrameData; 
+        std::vector<std::uint8_t> currentFrameData; 
         {
             std::unique_lock<std::mutex> lock(queueMutex);
             queueCV.wait(lock, [this] { return !frameQueue.empty() || !isWorkerRunning; });
@@ -205,20 +205,21 @@ void Recorder::stop() {
             gain = 25000.0f / maxPeak;
         }
 
-        std::vector<sf::Int16> finalSamples;
+        std::vector<std::int16_t> finalSamples;
         finalSamples.reserve(audioMixBuffer.size() * 2);
 
         for (float sample : audioMixBuffer) {
             float normalizedSample = sample * gain;
             if (normalizedSample > 32767.0f) normalizedSample = 32767.0f;
             if (normalizedSample < -32768.0f) normalizedSample = -32768.0f;
-            sf::Int16 s = static_cast<sf::Int16>(normalizedSample);
+            std::int16_t s = static_cast<std::int16_t>(normalizedSample);
             finalSamples.push_back(s); 
             finalSamples.push_back(s); 
         }
 
         sf::OutputSoundFile audioFile;
-        if (audioFile.openFromFile(tempAudioFilename, 44100, 2)) { 
+        // SFML 3: Pide explícitamente el ChannelMap para crear el archivo
+        if (audioFile.openFromFile(tempAudioFilename, 44100, 2, {sf::SoundChannel::FrontLeft, sf::SoundChannel::FrontRight})) { 
             audioFile.write(finalSamples.data(), finalSamples.size());
             audioFile.close(); 
         }
@@ -238,7 +239,7 @@ void Recorder::stop() {
     }
 }
 
-void Recorder::addAudioEvent(const sf::Int16* samples, std::size_t sampleCount, float volume) {
+void Recorder::addAudioEvent(const std::int16_t* samples, std::size_t sampleCount, float volume) {
     if (!isRecording) return;
 
     size_t startIndex = (size_t)((double)currentFrame / fps * sampleRate);
