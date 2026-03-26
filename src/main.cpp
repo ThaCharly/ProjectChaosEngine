@@ -158,39 +158,55 @@ int main()
         ImGui::GetIO().FontGlobalScale = 2.0f;
     }
 
-    // --- ESTILO IMGUI TIPO MOTOR GRÁFICO ---
-// --- ESTILO IMGUI TIPO MOTOR GRÁFICO (REFINADO UE5/UNITY) ---
+    // --- ESTILO IMGUI TIPO MOTOR GRÁFICO (MIDNIGHT FORGE PRO) ---
     ImGuiStyle& style = ImGui::GetStyle();
-    style.WindowRounding = 6.0f;
-    style.FrameRounding = 4.0f;
-    style.GrabRounding = 4.0f;
-    style.PopupRounding = 4.0f;
-    style.ScrollbarRounding = 6.0f;
+    style.WindowRounding    = 8.0f;
+    style.FrameRounding     = 6.0f;
+    style.PopupRounding     = 6.0f;
+    style.ChildRounding     = 6.0f;
+    style.GrabRounding      = 4.0f;
+    style.ScrollbarRounding = 8.0f;
     
-    // MAGIA UX: Márgenes dinámicos. Si es mobile, todo respira más para los dedos.
-    style.ItemSpacing = ImVec2(isMobile ? 12.0f : 8.0f, isMobile ? 10.0f : 6.0f);
-    style.FramePadding = ImVec2(isMobile ? 12.0f : 8.0f, isMobile ? 10.0f : 4.0f);
-    style.WindowPadding = ImVec2(12.0f, 12.0f);
+    style.WindowBorderSize  = 1.0f;
+    style.FrameBorderSize   = 1.0f;
+    style.PopupBorderSize   = 1.0f;
+    style.ChildBorderSize   = 1.0f;
+    
+    style.ItemSpacing       = ImVec2(isMobile ? 16.0f : 10.0f, isMobile ? 12.0f : 8.0f);
+    style.FramePadding      = ImVec2(isMobile ? 14.0f : 10.0f, isMobile ? 10.0f : 6.0f);
+    style.WindowPadding     = ImVec2(14.0f, 14.0f);
+    style.ItemInnerSpacing  = ImVec2(8.0f, 6.0f);
 
-    // Paleta Dark Mode moderna (Gris azulado profundo)
-    style.Colors[ImGuiCol_WindowBg] = ImVec4(0.10f, 0.10f, 0.11f, 0.98f);
-    style.Colors[ImGuiCol_Border] = ImVec4(0.25f, 0.25f, 0.27f, 0.50f);
-    style.Colors[ImGuiCol_FrameBg] = ImVec4(0.15f, 0.15f, 0.17f, 1.0f);
-    style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.20f, 0.20f, 0.22f, 1.0f);
-    style.Colors[ImGuiCol_FrameBgActive] = ImVec4(0.25f, 0.25f, 0.27f, 1.0f);
-    style.Colors[ImGuiCol_TitleBg] = ImVec4(0.08f, 0.08f, 0.09f, 1.0f);
-    style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.12f, 0.12f, 0.14f, 1.0f);
-    style.Colors[ImGuiCol_Header] = ImVec4(0.22f, 0.22f, 0.24f, 1.0f);
-    style.Colors[ImGuiCol_HeaderHovered] = ImVec4(0.28f, 0.28f, 0.30f, 1.0f);
-    style.Colors[ImGuiCol_HeaderActive] = ImVec4(0.35f, 0.35f, 0.37f, 1.0f);
-    style.Colors[ImGuiCol_Button] = ImVec4(0.20f, 0.20f, 0.22f, 1.0f);
-    style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.30f, 0.30f, 0.33f, 1.0f);
-    style.Colors[ImGuiCol_ButtonActive] = ImVec4(0.40f, 0.40f, 0.44f, 1.0f);
-    
-    // Acentos visuales para feedback claro
-    style.Colors[ImGuiCol_CheckMark] = ImVec4(0.0f, 0.7f, 1.0f, 1.0f); 
-    style.Colors[ImGuiCol_SliderGrab] = ImVec4(0.0f, 0.7f, 1.0f, 1.0f);
-    style.Colors[ImGuiCol_SliderGrabActive] = ImVec4(0.0f, 0.8f, 1.0f, 1.0f);
+    ImVec4* colors = style.Colors;
+    colors[ImGuiCol_Text]                   = ImVec4(0.92f, 0.92f, 0.94f, 1.00f);
+    colors[ImGuiCol_TextDisabled]           = ImVec4(0.50f, 0.50f, 0.52f, 1.00f);
+    colors[ImGuiCol_WindowBg]               = ImVec4(0.09f, 0.09f, 0.10f, 0.98f);
+    colors[ImGuiCol_ChildBg]                = ImVec4(0.12f, 0.12f, 0.14f, 0.95f); // Fondo de las "Cards"
+    colors[ImGuiCol_PopupBg]                = ImVec4(0.10f, 0.10f, 0.12f, 0.98f);
+    colors[ImGuiCol_Border]                 = ImVec4(0.20f, 0.20f, 0.22f, 0.80f);
+    colors[ImGuiCol_BorderShadow]           = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    colors[ImGuiCol_FrameBg]                = ImVec4(0.16f, 0.16f, 0.18f, 1.00f);
+    colors[ImGuiCol_FrameBgHovered]         = ImVec4(0.22f, 0.22f, 0.25f, 1.00f);
+    colors[ImGuiCol_FrameBgActive]          = ImVec4(0.28f, 0.28f, 0.32f, 1.00f);
+    colors[ImGuiCol_TitleBg]                = ImVec4(0.08f, 0.08f, 0.09f, 1.00f);
+    colors[ImGuiCol_TitleBgActive]          = ImVec4(0.08f, 0.08f, 0.09f, 1.00f);
+    colors[ImGuiCol_MenuBarBg]              = ImVec4(0.10f, 0.10f, 0.12f, 1.00f);
+    colors[ImGuiCol_ScrollbarBg]            = ImVec4(0.05f, 0.05f, 0.06f, 0.50f);
+    colors[ImGuiCol_ScrollbarGrab]          = ImVec4(0.25f, 0.25f, 0.28f, 1.00f);
+    colors[ImGuiCol_ScrollbarGrabHovered]   = ImVec4(0.35f, 0.35f, 0.38f, 1.00f);
+    colors[ImGuiCol_ScrollbarGrabActive]    = ImVec4(0.45f, 0.45f, 0.50f, 1.00f);
+    colors[ImGuiCol_CheckMark]              = ImVec4(0.00f, 0.85f, 1.00f, 1.00f); // Neón charrúa
+    colors[ImGuiCol_SliderGrab]             = ImVec4(0.00f, 0.70f, 0.90f, 1.00f);
+    colors[ImGuiCol_SliderGrabActive]       = ImVec4(0.00f, 0.85f, 1.00f, 1.00f);
+    colors[ImGuiCol_Button]                 = ImVec4(0.18f, 0.18f, 0.20f, 1.00f);
+    colors[ImGuiCol_ButtonHovered]          = ImVec4(0.00f, 0.50f, 0.75f, 0.80f);
+    colors[ImGuiCol_ButtonActive]           = ImVec4(0.00f, 0.60f, 0.90f, 1.00f);
+    colors[ImGuiCol_Header]                 = ImVec4(0.18f, 0.18f, 0.20f, 1.00f);
+    colors[ImGuiCol_HeaderHovered]          = ImVec4(0.25f, 0.25f, 0.28f, 1.00f);
+    colors[ImGuiCol_HeaderActive]           = ImVec4(0.35f, 0.35f, 0.38f, 1.00f);
+    colors[ImGuiCol_Separator]              = ImVec4(0.20f, 0.20f, 0.22f, 1.00f);
+    colors[ImGuiCol_SeparatorHovered]       = ImVec4(0.00f, 0.70f, 0.90f, 0.78f);
+    colors[ImGuiCol_SeparatorActive]        = ImVec4(0.00f, 0.85f, 1.00f, 1.00f);
 
     sf::RenderTexture gameBuffer;
     if (!gameBuffer.resize({RENDER_WIDTH, RENDER_HEIGHT})) {
@@ -1004,47 +1020,62 @@ ImGui::Begin("Toolbar", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_
                 changed |= ImGui::DragFloat2("Size", size, 0.1f, 0.5f, 30.0f);
                 changed |= ImGui::SliderInt("Sound ID", &snd, 0, 8);
 
-                // --- CONTROL DE CAPAS Y ESTILO INDEPENDIENTE ---
-                ImGui::Separator();
-                ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, 1.0f), "RENDER LAYER & STYLE");
-                
-                ImGui::InputInt("Z-Index Layer", &w.zIndex, 1, 5);
-
-                // El checkbox para matar el borde a esta pared específica
-                ImGui::Checkbox("Draw Outline (Border)", &w.hasOutline);
-
-                ImGui::Separator();
-                ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "DESTRUCTION SYSTEM");
-                if (ImGui::Checkbox("Is Destructible", &w.isDestructible)) {
-                    if (w.isDestructible) w.currentHits = w.maxHits;
-                }
-
-                if (w.isDestructible) {
-                    ImGui::Indent();
-                    int oldMax = w.maxHits;
-                    if (ImGui::SliderInt("Max Hits", &w.maxHits, 1, 200)) {
-                        // FIX LÓGICO: Si alteramos el máximo, ajustamos la vida actual en caliente.
-                        if (w.currentHits == oldMax) w.currentHits = w.maxHits; 
-                        else if (w.currentHits > w.maxHits) w.currentHits = w.maxHits;
-                    }
-                    
-                    // Slider explícito de vida para control total
-                    ImGui::SliderInt("Current Hits", &w.currentHits, 1, w.maxHits);
-                    
-                    // --- NUEVO: TOGGLE TEXTO / LEDS ---
-                    ImGui::Checkbox("Use Text for HP (Instead of LEDs)", &w.useTextForHP);
-
-                    float healthPct = (float)w.currentHits / (float)w.maxHits;
-                    std::string hpOverlay = std::to_string(w.currentHits) + " / " + std::to_string(w.maxHits);
-                    ImGui::ProgressBar(healthPct, ImVec2(-1, 0), hpOverlay.c_str());
-                    ImGui::Unindent();
-                }
-                
                 if (changed) physics.updateCustomWall(selectedIndex, pos[0], pos[1], size[0], size[1], snd, w.shapeType, w.rotation);
+                ImGui::Spacing();
 
-                ImGui::Separator();
-// --- GEOMETRÍA ---
-                if (ImGui::CollapsingHeader("Geometry", ImGuiTreeNodeFlags_DefaultOpen)) {
+                // --- CARD: RENDER LAYER & STYLE ---
+                ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
+                if (ImGui::BeginChild("RenderCard", ImVec2(0, 100), ImGuiChildFlags_Borders)) {
+                    ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, 1.0f), "RENDER LAYER & STYLE");
+                    ImGui::Separator();
+                    ImGui::Spacing();
+                    
+                    ImGui::InputInt("Z-Index Layer", &w.zIndex, 1, 5);
+                    ImGui::Checkbox("Draw Outline (Border)", &w.hasOutline);
+                }
+                ImGui::EndChild();
+                ImGui::PopStyleVar();
+                ImGui::Spacing();
+
+                // --- CARD: DESTRUCTION SYSTEM ---
+                ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
+                if (ImGui::BeginChild("DestructionCard", ImVec2(0, w.isDestructible ? 160 : 65), ImGuiChildFlags_Borders)) {
+                    ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "DESTRUCTION SYSTEM");
+                    ImGui::Separator();
+                    ImGui::Spacing();
+
+                    if (ImGui::Checkbox("Is Destructible", &w.isDestructible)) {
+                        if (w.isDestructible) w.currentHits = w.maxHits;
+                    }
+
+                    if (w.isDestructible) {
+                        ImGui::Indent(10.0f);
+                        int oldMax = w.maxHits;
+                        if (ImGui::SliderInt("Max Hits", &w.maxHits, 1, 200)) {
+                            if (w.currentHits == oldMax) w.currentHits = w.maxHits; 
+                            else if (w.currentHits > w.maxHits) w.currentHits = w.maxHits;
+                        }
+                        
+                        ImGui::SliderInt("Current Hits", &w.currentHits, 1, w.maxHits);
+                        ImGui::Checkbox("Use Text for HP (Instead of LEDs)", &w.useTextForHP);
+
+                        float healthPct = (float)w.currentHits / (float)w.maxHits;
+                        std::string hpOverlay = std::to_string(w.currentHits) + " / " + std::to_string(w.maxHits);
+                        ImGui::ProgressBar(healthPct, ImVec2(-1, 0), hpOverlay.c_str());
+                        ImGui::Unindent(10.0f);
+                    }
+                }
+                ImGui::EndChild();
+                ImGui::PopStyleVar();
+                ImGui::Spacing();
+
+                // --- CARD: GEOMETRY ---
+                ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
+                if (ImGui::BeginChild("GeometryCard", ImVec2(0, 135), ImGuiChildFlags_Borders)) {
+                    ImGui::TextColored(ImVec4(0.0f, 0.7f, 1.0f, 1.0f), "GEOMETRY");
+                    ImGui::Separator();
+                    ImGui::Spacing();
+
                     int sType = w.shapeType;
                     float rotDeg = w.rotation * 180.0f / 3.14159f; 
                     bool geoChanged = false;
@@ -1054,20 +1085,29 @@ ImGui::Begin("Toolbar", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_
 
                     if (ImGui::SliderFloat("Rotation", &rotDeg, 0.0f, 360.0f, "%.0f deg")) geoChanged = true;
                     
-                    // Botones de rotación rápida alineados prolijamente
+                    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.0f, 4.0f));
                     if (ImGui::Button("0°", ImVec2(40,0))) { rotDeg = 0.0f; geoChanged = true; } ImGui::SameLine();
                     if (ImGui::Button("90°", ImVec2(40,0))) { rotDeg = 90.0f; geoChanged = true; } ImGui::SameLine();
                     if (ImGui::Button("180°", ImVec2(45,0))) { rotDeg = 180.0f; geoChanged = true; } ImGui::SameLine();
                     if (ImGui::Button("270°", ImVec2(45,0))) { rotDeg = 270.0f; geoChanged = true; }
+                    ImGui::PopStyleVar();
 
                     if (geoChanged || changed) { 
                         float rotRad = rotDeg * 3.14159f / 180.0f;
                         physics.updateCustomWall(selectedIndex, pos[0], pos[1], size[0], size[1], snd, sType, rotRad);
                     }
                 }
+                ImGui::EndChild();
+                ImGui::PopStyleVar();
+                ImGui::Spacing();
 
-                // --- APARIENCIA ---
-                if (ImGui::CollapsingHeader("Appearance", ImGuiTreeNodeFlags_DefaultOpen)) {
+                // --- CARD: APPEARANCE & DANGER ---
+                ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
+                if (ImGui::BeginChild("AppearanceCard", ImVec2(0, 105), ImGuiChildFlags_Borders)) {
+                    ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "APPEARANCE & DANGER");
+                    ImGui::Separator();
+                    ImGui::Spacing();
+
                     sf::Color c = w.neonColor;
                     ImVec4 imColor = ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, 1.0f);
 
@@ -1080,15 +1120,15 @@ ImGui::Begin("Toolbar", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_
                     if (ImGui::Combo("##Color", &currentColorIdx, colorNames, IM_ARRAYSIZE(colorNames))) {
                         physics.updateWallColor(selectedIndex, currentColorIdx);
                     }
-                }
 
-                ImGui::Separator();
-                ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "DANGER ZONE"); 
-                if (ImGui::Checkbox("IS DEADLY (Spike)", &w.isDeadly)) {
-                    if (w.isDeadly) physics.updateWallColor(selectedIndex, 5); 
+                    if (ImGui::Checkbox("IS DEADLY (Spike)", &w.isDeadly)) {
+                        if (w.isDeadly) physics.updateWallColor(selectedIndex, 5); 
+                    }
                 }
+                ImGui::EndChild();
+                ImGui::PopStyleVar();
+                ImGui::Spacing();
 
-                ImGui::Separator();
                 if (ImGui::CollapsingHeader("Expansion Properties")) {
                     ImGui::Checkbox("Is Expandable", &w.isExpandable);
                     if (w.isExpandable) {
