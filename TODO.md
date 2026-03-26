@@ -1,11 +1,3 @@
- Veo que tengo que bajarle la velocidad, 100% seguro jajaja.
-
-
-También añadirle alguna "estela" o algo así a los cuadraditos para que no sean tan planos, y también colores a las paredes, colores al fondo.
-
-
-Y por último, una forma de guardar y cargar mapas. 
-
 3. Explosiones de Muerte (Shatter & Scorch Marks)
 
 Vi que en el código de Box2D, cuando un racer toca los pinchos o es aplastado, dejaste un // Opcional: Sonido de muerte o fx visual y le ponés una tumba. La tumba es estática; en una simulación de físicas, la destrucción tiene que ser caótica.
@@ -16,3 +8,4 @@ Vi que en el código de Box2D, cuando un racer toca los pinchos o es aplastado, 
 
 
 
+El main.cpp.txt tiene una implementación de multiselecting que está en fase de prueba.
