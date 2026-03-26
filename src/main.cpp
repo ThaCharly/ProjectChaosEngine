@@ -616,6 +616,7 @@ ImGuiIO& io = ImGui::GetIO();
                     bool ctrl = sf::Keyboard::isKeyPressed(sf::Keyboard::Key::LControl) || sf::Keyboard::isKeyPressed(sf::Keyboard::Key::RControl);
                     bool alt = sf::Keyboard::isKeyPressed(sf::Keyboard::Key::LAlt) || sf::Keyboard::isKeyPressed(sf::Keyboard::Key::RAlt);
                     bool z = sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Z);
+                    bool x = sf::Keyboard::isKeyPressed(sf::Keyboard::Key::X);
 
                     if (ctrl) {
                         return std::round(valueB2); // Clavado a 1.0 exacto en Box2D
@@ -625,6 +626,8 @@ ImGuiIO& io = ImGui::GetIO();
                         return std::round(valueB2 * 4.0f) / 4.0f; // Clavado a 0.25 exacto en Box2D
                     } else if (z) {
                         return std::round(valueB2 * 10.0f) / 10.0f; // Clavado a 0.1 exacto en Box2D
+                    } else if (x) {
+                        return std::round(valueB2 * 20.0f) / 20.0f; // Clavado a 0.05 exacto en Box2D
                     }
                     
                     
