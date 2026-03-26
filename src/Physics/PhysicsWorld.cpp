@@ -539,7 +539,9 @@ void PhysicsWorld::saveMap(const std::string& filename) {
              << w.isDestructible << " "
              << w.maxHits << " "
              << w.currentHits << " "
-             << w.useTextForHP << "\n";
+             << w.useTextForHP << " "
+             << w.zIndex << " "
+             << w.hasOutline << "\n";
     }
 
     for (const auto& k : knives) {
@@ -662,6 +664,12 @@ void PhysicsWorld::loadMap(const std::string& filename) {
                     bool useTxt = false;
                     if (ss >> useTxt) newWall.useTextForHP = useTxt;
                 }
+                
+                int zId = 0;
+                if (ss >> zId) newWall.zIndex = zId;
+                
+                bool hasOutl = true;
+                if (ss >> hasOutl) newWall.hasOutline = hasOutl;
 
                 updateCustomWall(customWalls.size() - 1, x, y, w, h, sid, sType, rot);
                 customWalls.back().isDeadly = deadly;
@@ -1185,7 +1193,8 @@ for(auto& status : racerStatus) {
 void PhysicsWorld::duplicateCustomWall(int index) {
     if (index < 0 || index >= customWalls.size()) return;
 
-    const CustomWall& original = customWalls[index];
+    // COPIA POR VALOR: Evita dangling references cuando addCustomWall reasigna el vector en memoria.
+    CustomWall original = customWalls[index];
     b2Vec2 pos = original.body->GetPosition();
 
     // Creamos la pared base desfasada 1 metro en X e Y para que se note en pantalla
@@ -1218,6 +1227,9 @@ void PhysicsWorld::duplicateCustomWall(int index) {
     newWall.baseFillColor = original.baseFillColor;
     newWall.neonColor = original.neonColor;
     newWall.flashColor = original.flashColor;
+    
+    newWall.zIndex = original.zIndex;
+    newWall.hasOutline = original.hasOutline;
 
     // Actualizamos el tipo de cuerpo en Box2D si es una plataforma móvil
     if (newWall.isMoving) {
@@ -1230,18 +1242,22 @@ void PhysicsWorld::createWalls(float widthPixels, float heightPixels) {
     mapHeight = worldHeightMeters;
     float thick = 0.5f;
 
-    // AHORA LAS PAREDES DEL BORDE TIENEN SONIDO Y COLOR
+// AHORA LAS PAREDES DEL BORDE TIENEN SONIDO Y COLOR
     addCustomWall(mapWidth / 2.0f, mapHeight, mapWidth, thick, 1); // Piso
     customWalls.back().borderSide = 0;
+    customWalls.back().hasOutline = false;
     
     addCustomWall(mapWidth / 2.0f, 0.0f, mapWidth, thick, 1);   // Techo
     customWalls.back().borderSide = 1;
+    customWalls.back().hasOutline = false;
     
     addCustomWall(0.0f, mapHeight / 2.0f, thick, mapHeight, 1); // Izq
     customWalls.back().borderSide = 2;
+    customWalls.back().hasOutline = false;
     
     addCustomWall(mapWidth, mapHeight / 2.0f, thick, mapHeight, 1);// Der
     customWalls.back().borderSide = 3;
+    customWalls.back().hasOutline = false;
 }
 
 void PhysicsWorld::updateMapBounds(float newW, float newH) {
