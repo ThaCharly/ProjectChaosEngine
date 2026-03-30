@@ -109,6 +109,8 @@ public:
         if (id > 0 && id <= 8) playMidiNote(midiMap[id]);
     }
 
+    void sendToRecorder(const std::int16_t* samples, std::size_t count, float vol);
+
 private:
     sf::Sound* getFreeSound() {
         for (auto& s : soundPool) {
@@ -117,8 +119,6 @@ private:
         }
         return &soundPool[0]; 
     }
-
-    void sendToRecorder(const std::int16_t* samples, std::size_t count, float vol);
 
     // Cambiamos el nombre para ser claros
     std::map<int, sf::SoundBuffer> midiBuffers;

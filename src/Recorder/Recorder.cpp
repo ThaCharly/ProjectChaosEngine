@@ -49,7 +49,7 @@ Recorder::Recorder(int width, int height, int fps, const std::string& outputFile
                       "-r " + std::to_string(fps) + " "
                       "-i - "
                       "-vf \"vflip,format=yuv420p\" " 
-                      "-c:v hevc_nvenc -preset p7 -tune hq -rc vbr -cq 18 -b:v 0 " 
+                      "-c:v hevc_nvenc -preset p4 -tune hq -rc vbr -cq 18 -b:v 0 " 
                       "\"" + tempVideoFilename + "\""; 
 
     ffmpegPipe = popen(cmd.c_str(), "w");
@@ -69,15 +69,15 @@ Recorder::Recorder(int width, int height, int fps, const std::string& outputFile
         throw std::runtime_error("Pah, la gráfica no soporta PBOs o falló la carga de OpenGL.");
     }
 
-    // --- 2. INICIALIZAMOS EL DOBLE BUFFER (PING-PONG) ---
+    // --- 2. INICIALIZAMOS EL TRIPLE BUFFER (EL POOL DE RAM AHORA ES DINÁMICO) ---
     size_t dataSize = this->width * this->height * 4;
-    my_glGenBuffers(2, pbo);
+
+    my_glGenBuffers(3, pbo);
     
-    my_glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo[0]);
-    my_glBufferData(GL_PIXEL_PACK_BUFFER, dataSize, nullptr, GL_STREAM_READ);
-    
-    my_glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo[1]);
-    my_glBufferData(GL_PIXEL_PACK_BUFFER, dataSize, nullptr, GL_STREAM_READ);
+    for (int i = 0; i < 3; ++i) {
+        my_glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo[i]);
+        my_glBufferData(GL_PIXEL_PACK_BUFFER, dataSize, nullptr, GL_STREAM_READ);
+    }
     
     my_glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
     
@@ -90,7 +90,7 @@ Recorder::Recorder(int width, int height, int fps, const std::string& outputFile
 Recorder::~Recorder() {
     stop(); 
     if (my_glDeleteBuffers) {
-        my_glDeleteBuffers(2, pbo);
+        my_glDeleteBuffers(3, pbo);
     }
 }
 
@@ -104,8 +104,6 @@ void Recorder::addFrame(const sf::Texture& texture) {
     glBindTexture(GL_TEXTURE_2D, texture.getNativeHandle());
 
     // 2. TRANSFERENCIA ASÍNCRONA (VRAM -> PBO)
-    // Le ordenamos al controlador DMA de la GPU que empiece a copiar la textura.
-    // Esto NO bloquea la CPU, retorna instantáneamente.
     my_glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo[pboIndex]);
     glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
 
@@ -113,25 +111,45 @@ void Recorder::addFrame(const sf::Texture& texture) {
     if (!firstFrame) {
         my_glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo[nextPboIndex]);
         
-        // Mapeamos la memoria del PBO que ya terminó de transferirse
         GLubyte* ptr = (GLubyte*)my_glMapBuffer(GL_PIXEL_PACK_BUFFER, GL_READ_ONLY);
 
         if (ptr) {
-            // Acá sí hacemos la copia a RAM, pero la info ya viajó por el PCIe
-            std::vector<std::uint8_t> buffer(ptr, ptr + dataSize);
-            my_glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
-
-            // Lo mandamos al hilo esclavo de FFmpeg con BACKPRESSURE
+            std::vector<std::uint8_t> buffer;
+            bool needsAllocation = false;
+            
+            // Tomamos un buffer reciclado, o creamos uno nuevo si no llegamos al límite
             {
                 std::unique_lock<std::mutex> lock(queueMutex);
-                // Si la cola llega al máximo, pausamos la simulación hasta que FFmpeg libere espacio
-                queueSpaceCV.wait(lock, [this] { return frameQueue.size() < MAX_QUEUE_SIZE; });
+                if (!freeQueue.empty()) {
+                    buffer = std::move(freeQueue.front());
+                    freeQueue.pop();
+                } else if (totalAllocatedBuffers < MAX_QUEUE_SIZE) {
+                    totalAllocatedBuffers++;
+                    needsAllocation = true;
+                } else {
+                    // Si ya llegamos a los 3.3GB, toca esperar a que el encoder libere uno
+                    queueSpaceCV.wait(lock, [this] { return !freeQueue.empty(); });
+                    buffer = std::move(freeQueue.front());
+                    freeQueue.pop();
+                }
+            }
+
+            // Si tuvimos que crear uno nuevo, lo hacemos AFERA del bloqueo para que no tranque nada
+            if (needsAllocation) {
+                buffer.resize(dataSize);
+            }
+
+            // Copia de muy bajo nivel ultra rápida
+            std::memcpy(buffer.data(), ptr, dataSize);
+            my_glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+
+            {
+                std::unique_lock<std::mutex> lock(queueMutex);
                 frameQueue.push(std::move(buffer));
             }
             queueCV.notify_one();
         }
     } else {
-        // Sacrificamos el primerísimo frame visual porque el PBO "next" todavía tiene basura
         firstFrame = false; 
     }
 
@@ -139,9 +157,9 @@ void Recorder::addFrame(const sf::Texture& texture) {
     my_glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    // 5. CAMBIO DE ROLES (Ping-Pong)
-    pboIndex = (pboIndex + 1) % 2;
-    nextPboIndex = (pboIndex + 1) % 2;
+    // 5. CAMBIO DE ROLES (Triple Buffering)
+    pboIndex = (pboIndex + 1) % 3;
+    nextPboIndex = (pboIndex + 1) % 3;
 }
 
 // ... EL RESTO QUEDA IGUAL (workerLoop, stop, addAudioEvent) ...
@@ -159,13 +177,17 @@ void Recorder::workerLoop() {
             frameQueue.pop();
         }
         
-        // ¡AVISAMOS AL HILO PRINCIPAL QUE HAY LUGAR EN LA RAM!
-        queueSpaceCV.notify_one(); 
-
         // Leemos directo de la memoria contigua del vector para escupirlo a FFmpeg
         if (ffmpegPipe) {
             fwrite(currentFrameData.data(), 1, width * height * 4, ffmpegPipe); 
         }
+
+        // Devolvemos el buffer reciclado a la cola libre y avisamos que hay lugar
+        {
+            std::unique_lock<std::mutex> lock(queueMutex);
+            freeQueue.push(std::move(currentFrameData));
+        }
+        queueSpaceCV.notify_one(); 
     }
 }
 
@@ -199,10 +221,10 @@ void Recorder::stop() {
         }
 
         float gain = 1.0f;
-        if (maxPeak > 32000.0f) {
+        if (maxPeak > 38000.0f) {
+            gain = 38000.0f / maxPeak;
+        } else if (maxPeak > 0.0f && maxPeak < 32000.0f) {
             gain = 32000.0f / maxPeak;
-        } else if (maxPeak > 0.0f && maxPeak < 10000.0f) {
-            gain = 25000.0f / maxPeak;
         }
 
         std::vector<std::int16_t> finalSamples;

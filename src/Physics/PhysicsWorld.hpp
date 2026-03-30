@@ -7,6 +7,7 @@
 #include <random>
 #include <set>
 #include <string>
+#include <optional>
 #include "../Sound/SoundManager.hpp" 
 
 struct CollisionEvent {
@@ -45,11 +46,13 @@ struct KillEvent {
 
 struct RacerStatus {
     bool isAlive = true;
-    bool hasFinished = false; // <--- NUEVO
-    bool isFinishing = false; // <--- ESTADO NUEVO: Cruzando la meta
-    float finishTimer = 0.0f; // <--- CRONÓMETRO
+    bool hasFinished = false;
+    bool isFinishing = false;
+    float finishTimer = 0.0f;
     b2Vec2 deathPos = {0, 0};
     bool hasKnife = false;
+    b2Vec2 initialPos = {0.0f, 0.0f};
+    float initialAngle = 0.0f;
 };
 
 struct CustomWall {
@@ -167,6 +170,7 @@ public:
     void updateFixedRotation(bool fixed);
     void updateFriction(float newFriction);
     void updateWinZone(float x, float y, float w, float h);
+    void updateRacerInitialState(int index, b2Vec2 pos, float angle); // <--- PARA EL EDITOR
     
     float currentRacerSize = 1.0f;
     float currentRestitution = 1.0f;
@@ -221,6 +225,9 @@ private:
     ChaosContactListener contactListener;
     std::mt19937 rng;
     SoundManager* soundManager; 
+
+    sf::SoundBuffer deathBuffer;
+    std::optional<sf::Sound> deathSound;
 
     std::vector<KnifeItem> knives;
 

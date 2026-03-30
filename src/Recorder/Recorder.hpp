@@ -12,6 +12,7 @@
 #include <SFML/OpenGL.hpp> // <--- Magia de OpenGL
 #include <SFML/Audio.hpp> 
 #include <cstdint>
+#include <cstring>
 
 class Recorder {
 public:
@@ -47,12 +48,14 @@ private:
     std::condition_variable queueCV;
     std::condition_variable queueSpaceCV;
     std::queue<std::vector<std::uint8_t>> frameQueue;
+    std::queue<std::vector<std::uint8_t>> freeQueue; // <--- POOL DE MEMORIA
     std::atomic<bool> isWorkerRunning;
 
-    const size_t MAX_QUEUE_SIZE = 480; // 60 son aproximadamente 1.1GB de RAM, 480 son 8.8GB
+    const size_t MAX_QUEUE_SIZE = 180; // Bajamos el max porque vamos a pre-alocar la RAM (240 = ~4.4GB fijos)
+    int totalAllocatedBuffers = 0;
 
     // --- PBOs (Pixel Buffer Objects) ---
-    GLuint pbo[2];
+    GLuint pbo[3]; // <--- TRIPLE BUFFERING
     int pboIndex = 0;
     int nextPboIndex = 1;
     bool firstFrame = true;

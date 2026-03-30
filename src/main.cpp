@@ -457,7 +457,14 @@ ImGuiIO& io = ImGui::GetIO();
 
             // --- DETECCIÓN DE HOVER (Cursores y Gizmos) ---
             if (currentGizmo == GizmoState::None) {
-                if (selectedType == EntityType::Wall && selectedIndex >= 0 && selectedIndex < physics.getCustomWalls().size()) {
+                if (selectedType == EntityType::Racers && selectedIndex >= 0 && selectedIndex < bodies.size()) {
+                    b2Body* b = bodies[selectedIndex];
+                    float rSize = physics.currentRacerSize / 2.0f;
+                    b2Vec2 rotHandleGlobal = toGlobal(b2Vec2(0.0f, -rSize - 1.5f), b->GetPosition(), b->GetAngle());
+                    if (currentTool == EditorTool::Rotate && (mouseB2 - rotHandleGlobal).Length() < gizmoTolerance) {
+                        isHoveringRotate = true;
+                    }
+                } else if (selectedType == EntityType::Wall && selectedIndex >= 0 && selectedIndex < physics.getCustomWalls().size()) {
                     CustomWall& w = physics.getCustomWalls()[selectedIndex];
                     b2Vec2 rotHandleGlobal = w.body->GetWorldPoint(b2Vec2(0.0f, -w.height / 2.0f - 1.5f));
                     b2Vec2 corners[4] = {
@@ -545,7 +552,15 @@ ImGuiIO& io = ImGui::GetIO();
                     bool handleClicked = false;
                     
                     // 1. Chequeamos si tocamos un Gizmo activo del objeto seleccionado
-                    if (selectedType == EntityType::Wall && selectedIndex >= 0) {
+                    if (selectedType == EntityType::Racers && selectedIndex >= 0) {
+                        b2Body* b = bodies[selectedIndex];
+                        if (isHoveringRotate) {
+                            currentGizmo = GizmoState::Rotating;
+                            initialMouseAngle = std::atan2(mouseB2.y - b->GetPosition().y, mouseB2.x - b->GetPosition().x);
+                            initialRotation = b->GetAngle();
+                            handleClicked = true;
+                        }
+                    } else if (selectedType == EntityType::Wall && selectedIndex >= 0) {
                         CustomWall& w = physics.getCustomWalls()[selectedIndex];
                         if (isHoveringRotate) {
                             currentGizmo = GizmoState::Rotating;
@@ -661,6 +676,7 @@ ImGuiIO& io = ImGui::GetIO();
                         b->SetTransform(b2Vec2(targetXB2, targetYB2), b->GetAngle());
                         b->SetLinearVelocity(b2Vec2(0.0f, 0.0f)); 
                         b->SetAwake(true);
+                        physics.updateRacerInitialState(selectedIndex, b2Vec2(targetXB2, targetYB2), b->GetAngle());
                     }
                     else if (selectedType == EntityType::WinZone) {
                         physics.winZonePos[0] = targetXB2;
@@ -668,9 +684,20 @@ ImGuiIO& io = ImGui::GetIO();
                         physics.updateWinZone(physics.winZonePos[0], physics.winZonePos[1], physics.winZoneSize[0], physics.winZoneSize[1]);
                     }
                 } 
-                else if (currentGizmo == GizmoState::Rotating && selectedType == EntityType::Wall && selectedIndex >= 0) {
-                    CustomWall& w = physics.getCustomWalls()[selectedIndex];
-                    float currentMouseAngle = std::atan2(mouseB2.y - w.body->GetPosition().y, mouseB2.x - w.body->GetPosition().x);
+                else if (currentGizmo == GizmoState::Rotating) {
+                    float currentMouseAngle = 0.0f;
+                    b2Vec2 objPos;
+
+                    if (selectedType == EntityType::Wall && selectedIndex >= 0) {
+                        CustomWall& w = physics.getCustomWalls()[selectedIndex];
+                        objPos = w.body->GetPosition();
+                        currentMouseAngle = std::atan2(mouseB2.y - objPos.y, mouseB2.x - objPos.x);
+                    } else if (selectedType == EntityType::Racers && selectedIndex >= 0) {
+                        b2Body* b = bodies[selectedIndex];
+                        objPos = b->GetPosition();
+                        currentMouseAngle = std::atan2(mouseB2.y - objPos.y, mouseB2.x - objPos.x);
+                    }
+
                     float newAngle = initialRotation + (currentMouseAngle - initialMouseAngle);
                     
                     // Snap de rotación
@@ -687,9 +714,17 @@ ImGuiIO& io = ImGui::GetIO();
                         newAngle = deg * 3.14159f / 180.0f;
                     }
 
-                    w.rotation = newAngle;
-                    w.body->SetTransform(w.body->GetPosition(), newAngle);
-                    w.body->SetAwake(true);
+                    if (selectedType == EntityType::Wall && selectedIndex >= 0) {
+                        CustomWall& w = physics.getCustomWalls()[selectedIndex];
+                        w.rotation = newAngle;
+                        w.body->SetTransform(objPos, newAngle);
+                        w.body->SetAwake(true);
+                    } else if (selectedType == EntityType::Racers && selectedIndex >= 0) {
+                        b2Body* b = bodies[selectedIndex];
+                        b->SetTransform(objPos, newAngle);
+                        b->SetAwake(true);
+                        physics.updateRacerInitialState(selectedIndex, objPos, newAngle);
+                    }
                 }
                 else if (currentGizmo == GizmoState::Scaling) {
                     float deltaX, deltaY;
@@ -741,37 +776,31 @@ ImGuiIO& io = ImGui::GetIO();
 sf::Time dt = clock.restart();
         float dtSec = dt.asSeconds();
         
-        float timeStep = 1.0f / (float)simFPS; // Paso dinámico para tiempo real
-
         if (recorder && recorder->isRecording) {
-            // Override absoluto: Clavamos el tiempo a la frecuencia de grabación
+            // Offline render: Clavamos el avance del tiempo global a lo que dura un frame del video
             dtSec = 1.0f / (float)recordFPS;
-            timeStep = dtSec; 
+        }
+
+        // --- MAGIA DEL DETERMINISMO ---
+        // Clavamos la física a 240Hz. Esto asegura que la carrera sea EXACTAMENTE igual siempre,
+        // sin importar si grabás a 60, 120, 240 o si la mirás en tiempo real.
+        const float PHYSICS_STEP = 1.0f / 360.0f;
+
+        if (!physics.isPaused) {
+            accumulator += dtSec;
+            while (accumulator >= PHYSICS_STEP) {
+                physics.step(PHYSICS_STEP, velIter, posIter);
+                physics.updateWallExpansion(PHYSICS_STEP);
+                physics.updateMovingPlatforms(PHYSICS_STEP);
+                accumulator -= PHYSICS_STEP;
+            }
+        } else {
+            accumulator = 0.0f;
         }
 
         physics.updateWallVisuals(dtSec);
         physics.updateParticles(dtSec);
         globalTime += dtSec;
-
-        if (!physics.isPaused) {
-            if (recorder && recorder->isRecording) {
-                // Grabando: Avanza la física fotograma a fotograma como reloj suizo
-                physics.step(timeStep, velIter, posIter);
-                physics.updateWallExpansion(timeStep);
-                physics.updateMovingPlatforms(timeStep);
-            } else {
-                // Tiempo Real: El acumulador te salva de cualquier lagazo
-                accumulator += dtSec;
-                while (accumulator >= timeStep) {
-                    physics.step(timeStep, velIter, posIter);
-                    physics.updateWallExpansion(timeStep);
-                    physics.updateMovingPlatforms(timeStep);
-                    accumulator -= timeStep;
-                }
-            }
-        } else {
-            accumulator = 0.0f;
-        }
 
 if (!physics.isPaused) {
             for (size_t i = 0; i < bodies.size(); ++i) {
@@ -1786,7 +1815,35 @@ ImGui::Begin("Toolbar", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_
         // ==============================================
         // --- DIBUJAR GIZMOS (UI DEL EDITOR, CAPA ABSOLUTA) ---
         // ==============================================
-        if (selectedType == EntityType::Wall && selectedIndex >= 0 && selectedIndex < customWalls.size()) {
+        if (selectedType == EntityType::Racers && selectedIndex >= 0 && selectedIndex < bodies.size()) {
+            b2Body* b = bodies[selectedIndex];
+            float rSize = physics.currentRacerSize * physics.SCALE;
+            
+            sf::Transform t;
+            t.translate({b->GetPosition().x * physics.SCALE, b->GetPosition().y * physics.SCALE});
+            t.rotate(sf::radians(b->GetAngle()));
+
+            if (currentTool == EditorTool::Rotate) {
+                bool rotActive = (currentGizmo == GizmoState::Rotating) || (currentGizmo == GizmoState::None && isHoveringRotate);
+                sf::Vector2f topEdgePx = t.transformPoint({0.0f, -rSize / 2.0f});
+                sf::Vector2f rotHandlePx = t.transformPoint({0.0f, -rSize / 2.0f - 1.5f * physics.SCALE});
+                
+                sf::VertexArray lineToRot(sf::PrimitiveType::Lines, 2);
+                lineToRot[0].position = topEdgePx; lineToRot[1].position = rotHandlePx;
+                lineToRot[0].color = sf::Color(255, 150, 0); lineToRot[1].color = sf::Color(255, 150, 0);
+                gameBuffer.draw(lineToRot);
+
+                float rotRadius = (rotActive ? 0.4f : 0.3f) * physics.SCALE;
+                sf::CircleShape rotCircle(rotRadius);
+                rotCircle.setOrigin({rotRadius, rotRadius});
+                rotCircle.setPosition(rotHandlePx);
+                rotCircle.setFillColor(rotActive ? sf::Color(255, 150, 0, 180) : sf::Color(255, 150, 0, 100));
+                rotCircle.setOutlineColor(sf::Color(255, 150, 0));
+                rotCircle.setOutlineThickness(1.5f);
+                gameBuffer.draw(rotCircle);
+            }
+        }
+        else if (selectedType == EntityType::Wall && selectedIndex >= 0 && selectedIndex < customWalls.size()) {
             const CustomWall& w = customWalls[selectedIndex];
             b2Vec2 pos = w.body->GetPosition();
             float rot = w.body->GetAngle();

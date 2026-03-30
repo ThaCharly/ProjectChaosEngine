@@ -74,6 +74,15 @@ PhysicsWorld::PhysicsWorld(float widthPixels, float heightPixels, SoundManager* 
     rng.seed(77);
     this->soundManager = soundMgr;
 
+    // --- CARGAR SONIDO DE MUERTE ---
+    if (deathBuffer.loadFromFile("../assets/death.mp3")) {
+        deathSound.emplace(deathBuffer); // SFML 3: Se construye pasando el buffer en el emplace
+        deathSound->setVolume(75.0f); // Ajustalo si te rompe los tímpanos
+        std::cout << ">>> Sonido de muerte cargado joya." << std::endl;
+    } else {
+        std::cerr << ">>> ERROR: No se pudo cargar ../assets/death.mp3 (Revisá la ruta o si SFML soporta mp3)" << std::endl;
+    }
+
     contactListener.soundManager = soundMgr;
     contactListener.worldWidth = widthPixels / SCALE;
     world.SetContactListener(&contactListener);
@@ -124,21 +133,32 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
             b2Body* other = ce->other;
 
             // Chequeamos si ese "otro" es una pared nuestra
-            for (const auto& wall : customWalls) {
-                if (wall.body == other) {
-                    // SI ES MORTAL, CHAU RACER
-                    if (wall.isDeadly) {
-                        racerStatus[i].isAlive = false;
-                        racerStatus[i].deathPos = racer->GetPosition();
-                        racer->SetEnabled(false); // Lo sacamos de la simulación
-                        std::cout << ">>> RACER " << i << " MURIO EN PINCHOS <<<" << std::endl;
-                        
-                        // Opcional: Sonido de muerte o fx visual
+            // Chequeamos si ese "otro" es una pared nuestra
+                for (const auto& wall : customWalls) {
+                    if (wall.body == other) {
+                        // SI ES MORTAL, CHAU RACER
+                        if (wall.isDeadly) {
+                            racerStatus[i].isAlive = false;
+                            racerStatus[i].deathPos = racer->GetPosition();
+                            racer->SetEnabled(false); // Lo sacamos de la simulación
+                            std::cout << ">>> RACER " << i << " MURIO EN PINCHOS <<<" << std::endl;
+                            
+                            // Opcional: Sonido de muerte o fx visual
+                        }
+
+                        // SI ES DESTRUCTIBLE Y ESTAMOS ATRAPADOS CONTINUAMENTE
+                        // Box2D solo dispara BeginContact en el primer impacto. Si la pared
+                        // se expande y aprieta al racer, el contacto es continuo. 
+                        // Usamos el flashTimer de la pared como cooldown (~0.33s) para 
+                        // registrar daño bajo presión constante sin que explote en 1 frame.
+                        if (wall.isDestructible && wall.flashTimer <= 0.0f) {
+                            contactListener.wallsHit.insert(other);
+                        }
+
+                        break; // Ya encontramos la pared, salimos del loop de walls
                     }
-                    break; // Ya encontramos la pared, salimos del loop de walls
                 }
             }
-        }
     }
 
 // --- CHECK VICTORIA (CON DELAY) ---
@@ -258,6 +278,41 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
             // Pero cumple tu regla: "15 en X, 15 en Y".
             b->SetLinearVelocity(vel);
         }
+    } else {
+        // --- MODO LIBRE: Forzar límites de velocidad (Mínimo y Máximo) ---
+        float minVel = targetSpeed * 0.5f; // 50% del target
+        float maxVel = targetSpeed * 1.5f; // 150% del target (Ajustalo a gusto si es mucho/poco)
+        
+        for (b2Body* b : dynamicBodies) {
+            if (!b->IsEnabled()) continue;
+
+            b2Vec2 vel = b->GetLinearVelocity();
+            bool changed = false;
+
+            // --- EJE X ---
+            if (std::abs(vel.x) < minVel) {
+                if (std::abs(vel.x) < 0.01f) vel.x = (randomFloat(0.0f, 1.0f) > 0.5f) ? minVel : -minVel;
+                else vel.x = (vel.x > 0.0f) ? minVel : -minVel;
+                changed = true;
+            } else if (std::abs(vel.x) > maxVel) {
+                vel.x = (vel.x > 0.0f) ? maxVel : -maxVel;
+                changed = true;
+            }
+
+            // --- EJE Y ---
+            if (std::abs(vel.y) < minVel) {
+                if (std::abs(vel.y) < 0.01f) vel.y = (randomFloat(0.0f, 1.0f) > 0.5f) ? minVel : -minVel;
+                else vel.y = (vel.y > 0.0f) ? minVel : -minVel;
+                changed = true;
+            } else if (std::abs(vel.y) > maxVel) {
+                vel.y = (vel.y > 0.0f) ? maxVel : -maxVel;
+                changed = true;
+            }
+
+            if (changed) {
+                b->SetLinearVelocity(vel);
+            }
+        }
     }
 
     // --- RESOLVER PICKUPS ---
@@ -291,6 +346,22 @@ void PhysicsWorld::step(float timeStep, int velIter, int posIter) {
                 racerStatus[victimIdx].isAlive = false;
                 racerStatus[victimIdx].deathPos = dynamicBodies[victimIdx]->GetPosition();
                 dynamicBodies[victimIdx]->SetEnabled(false);
+                
+
+                // REPRODUCIR SONIDO
+                if (deathSound.has_value()) {
+                    // 1. Suena por los parlantes en tiempo real
+                    deathSound->play();
+                    
+                    // 2. Le inyectamos los samples crudos al Recorder para que queden en el video .mp4
+                    if (soundManager) {
+                        soundManager->sendToRecorder(
+                            deathBuffer.getSamples(), 
+                            (std::size_t)deathBuffer.getSampleCount(), 
+                            75.0f // El mismo volumen que le pusiste arriba
+                        );
+                    }
+                }
 
                 // El asesino suelta el cuchillo
                 racerStatus[killerIdx].hasKnife = false;
@@ -507,7 +578,8 @@ void PhysicsWorld::saveMap(const std::string& filename) {
     if (!file.is_open()) return;
 
     file << "CONFIG " << targetSpeed << " " << currentRacerSize << " " 
-         << currentRestitution << " " << enableChaos << " " << stopOnFirstWin << "\n";
+         << currentRestitution << " " << enableChaos << " " << stopOnFirstWin << " "
+         << currentFixedRotation << " " << currentFriction << "\n";
     file << "WINZONE " << winZonePos[0] << " " << winZonePos[1] << " " 
          << winZoneSize[0] << " " << winZoneSize[1] << " " << winZoneGlow << " " << "\n";
 
@@ -586,8 +658,20 @@ void PhysicsWorld::loadMap(const std::string& filename) {
             updateRacerSize(size); updateRestitution(rest);
             
             bool stopFW;
-            if (ss >> stopFW) stopOnFirstWin = stopFW;
-            else stopOnFirstWin = true; // Retrocompatibilidad
+            if (ss >> stopFW) {
+                stopOnFirstWin = stopFW;
+                bool fixRot;
+                if (ss >> fixRot) {
+                    updateFixedRotation(fixRot);
+                    float fric;
+                    if (ss >> fric) updateFriction(fric);
+                } else {
+                    updateFixedRotation(true);
+                }
+            } else {
+                stopOnFirstWin = true; // Retrocompatibilidad
+                updateFixedRotation(true);
+            }
         }
         else if (type == "WINZONE") {             
             float x, y, w, h;
@@ -692,6 +776,12 @@ void PhysicsWorld::loadMap(const std::string& filename) {
                 b->SetLinearVelocity(b2Vec2(vx, vy));
                 b->SetAngularVelocity(av);
                 b->SetAwake(true);
+                
+                // GUARDAR COMO POSICIÓN INICIAL PARA CUANDO SE RESETEE LA CARRERA
+                if (id < racerStatus.size()) {
+                    racerStatus[id].initialPos = b2Vec2(x, y);
+                    racerStatus[id].initialAngle = a;
+                }
             }
         }
     }
@@ -1174,13 +1264,16 @@ for(auto& status : racerStatus) {
 
     int i = 0; 
     for(auto b : dynamicBodies){ 
-        float x = (worldWidthMeters/5.0f)*(i+1); 
-        float y = worldHeightMeters/2.0f; 
-        
         b->SetEnabled(true); // <--- CORREGIDO: Usamos SetEnabled en lugar de SetActive
         
-        b->SetTransform(b2Vec2(x, y), 0); 
-        b->SetLinearVelocity(b2Vec2(targetSpeed, targetSpeed)); 
+        // Volver a la rotación y posición inicial configurada en el editor
+        b->SetTransform(racerStatus[i].initialPos, racerStatus[i].initialAngle); 
+        
+        // Para evitar que salgan todos en linea recta, le damos un poco de vida al vector inicial
+        float startVx = (randomFloat(0.0f, 1.0f) > 0.5f) ? targetSpeed : -targetSpeed;
+        float startVy = (randomFloat(0.0f, 1.0f) > 0.5f) ? targetSpeed : -targetSpeed;
+        
+        b->SetLinearVelocity(b2Vec2(startVx, startVy)); 
         b->SetAngularVelocity(0); 
         b->SetAwake(true); 
         i++; 
@@ -1300,7 +1393,17 @@ void PhysicsWorld::createRacers() {
     
     // --- INICIALIZAR ESTADO DE VIDA ---
     racerStatus.clear();
-    racerStatus.resize(dynamicBodies.size(), {true, false, false, 0.0f, {0,0}});
+    for (int i = 0; i < dynamicBodies.size(); ++i) {
+        b2Vec2 startPos((worldWidthMeters/5.0f)*(i+1), worldHeightMeters/2.0f);
+        racerStatus.push_back({true, false, false, 0.0f, {0,0}, false, startPos, 0.0f});
+    }
+}
+
+void PhysicsWorld::updateRacerInitialState(int index, b2Vec2 pos, float angle) {
+    if (index >= 0 && index < racerStatus.size()) {
+        racerStatus[index].initialPos = pos;
+        racerStatus[index].initialAngle = angle;
+    }
 }
 
 void PhysicsWorld::loadSong(const std::string& filename) {
